@@ -5,6 +5,10 @@
 
   tasks:
 
+    - name: if python
+      sh: python; exit()
+      register: res
+
     - name: install python
       raw: apt install python -y
-      when:
+      when: res == 0
