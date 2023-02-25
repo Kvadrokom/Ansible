@@ -1,0 +1,9 @@
+- name: Install python
+  hosts: zabbix
+  gather_facts: no
+  become: true
+
+  tasks:
+
+    - name: install python
+      raw: apt install python -y
