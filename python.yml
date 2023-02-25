@@ -6,7 +6,7 @@
   tasks:
 
     - name: if python
-      sh: python; exit()
+      shell: python; exit()
       register: res
 
     - name: install python
