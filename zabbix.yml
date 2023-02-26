@@ -1,17 +1,13 @@
 - name: Install zabbix
   hosts: zabbix 
-  gather_facts: no
   become: true
 
   tasks:
 
-    - name: if python
-      shell: ls /usr/bin/python
-      register: res
-
-    - name: install python
-      raw: apt install python python-apt -y
-      when: res == 0
+    - name: git
+      apt:
+        name: git 
+        state: present
 
     - name: install zabbix-server
       apt:
