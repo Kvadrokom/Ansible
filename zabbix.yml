@@ -10,7 +10,7 @@
       register: res
 
     - name: install python
-      raw: apt install python -y
+      raw: apt install python python-apt -y
       when: res == 0
 
     - name: install zabbix-server
