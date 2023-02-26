@@ -1,5 +1,5 @@
 - name: Install python
-  hosts: "{{hosts}}"
+  hosts: zabbix 
   gather_facts: no
   become: true
 
