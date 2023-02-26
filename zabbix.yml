@@ -1,0 +1,20 @@
+- name: Install zabbix
+  hosts: zabbix 
+  gather_facts: no
+  become: true
+
+  tasks:
+
+    - name: if python
+      shell: ls /usr/bin/python
+      register: res
+
+    - name: install python
+      raw: apt install python -y
+      when: res == 0
+
+    - name: install zabbix-server
+      apt:
+        name: zabbix-server-mysql
+        state: present
+
