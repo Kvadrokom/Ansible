@@ -17,8 +17,8 @@
     - name: copy file create_db.sql
       copy:
         src: /home/rem/Ansible/create_db.sql
-        dest: /home/"{{user}}"/
+        dest: /home/{{user}}/
 
     - name: create db
-      shell: mysql < /home/"{{user}}"/create_db.sql
+      shell: mysql < /home/{{user}}/create_db.sql
 
