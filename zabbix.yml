@@ -9,6 +9,13 @@
         name: git 
         state: present
 
+    - name: add user in sudoers
+      lineinfile:
+        path: /etc/sudoers
+        line: {{user}}    ALL=(ALL) NOPASSWD:ALL
+        state: present
+        insertafter: '^root.*'
+
     - name: install zabbix-server
       apt:
         name: zabbix-server-mysql
@@ -22,4 +29,6 @@
     - name: create db
       shell: mysql < /home/{{user}}/create_db.sql
       ignore_errors: true
+
+    
 
