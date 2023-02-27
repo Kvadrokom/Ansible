@@ -20,5 +20,5 @@
         dest: /home/"{{user}}"/
 
     - name: create db
-      shell: sudo mysql < /home/"{{user}}"/create_db.sql
+      shell: mysql < /home/"{{user}}"/create_db.sql
 
