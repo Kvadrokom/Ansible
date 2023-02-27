@@ -14,3 +14,11 @@
         name: zabbix-server-mysql
         state: present
 
+    - name: copy file create_db.sql
+      copy:
+        src: /home/rem/Ansible/create_db.sql
+        dest: /home/"{{user}}"/
+
+    - name: create db
+      shell: sudo mysql < /home/"{{user}}"/create_db.sql
+
