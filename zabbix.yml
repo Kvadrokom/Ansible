@@ -21,4 +21,5 @@
 
     - name: create db
       shell: mysql < /home/{{user}}/create_db.sql
+      ignore_errors: true
 
