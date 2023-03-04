@@ -30,5 +30,60 @@
       shell: mysql < /home/{{user}}/create_db.sql
       ignore_errors: true
 
+    - name: fill lam
+      shell:
+        - zcat /usr/share/zabbix-server-mysql/schema.sql.gz | mysql -u zabbix -p zabbix
+        - zcat /usr/share/zabbix-server-mysql/images.sql.gz | mysql -u abbix -p zabbix
+        - zcat /usr/share/zabbix-server-mysql/data.sql.gz | mysql -u zabbix -p zabbix
+
+    - name: add lines to config
+      lineinfile:
+        path: /etc/zabbix/zabbix_server.conf
+        state: present
+        line:
+          - DBHost=localhost
+          - DBUser=zabbix
+          - DBPassword=zabbix
+          - DBName=zabbix
+
+    - name: autostart zabbix-server
+      systemd:
+        name: zabbix-server
+        enabled: yes
+
+
+    - name: start zabbix-server
+      systemd:
+        name: zabbix-server
+        state: started
+
+    - name: install frontend zabbix
+      apt:
+        name:
+          - zabbix-frontend-php
+          - php-mysql
+        state: present
+
+    - name: make apach config
+      shell: a2enconf zabbix-frontend-php
+      notify:
+      - Restart apache
+
+    - name: create vizard file
+      file:
+        name: touch
+        path: /etc/zabbix/zabbix.conf.php
+        state: present
+        owner: www-data
+
+    handlers:
+     - name: Restart apache
+     systemd:
+       name: apache2
+       state: reloaded
+
     
+        
+
+
 
