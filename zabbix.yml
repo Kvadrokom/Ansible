@@ -31,7 +31,8 @@
       ignore_errors: true
 
     - name: fill lam
-      shell:
+      shell: "{{item}}"
+      with_item:
         - zcat /usr/share/zabbix-server-mysql/schema.sql.gz | mysql -u zabbix -p zabbix
         - zcat /usr/share/zabbix-server-mysql/images.sql.gz | mysql -u abbix -p zabbix
         - zcat /usr/share/zabbix-server-mysql/data.sql.gz | mysql -u zabbix -p zabbix
