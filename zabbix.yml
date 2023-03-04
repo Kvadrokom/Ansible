@@ -76,11 +76,11 @@
         state: present
         owner: www-data
 
-    handlers:
-     - name: Restart apache
-     systemd:
-       name: apache2
-       state: reloaded
+  handlers:
+    - name: Restart apache
+      systemd:
+        name: apache2
+        state: reloaded
 
     
         
