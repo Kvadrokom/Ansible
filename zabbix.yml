@@ -41,11 +41,12 @@
       lineinfile:
         path: /etc/zabbix/zabbix_server.conf
         state: present
-        line:
-          - "DBHost=localhost"
-          - "DBUser=zabbix"
-          - "DBPassword=zabbix"
-          - "DBName=zabbix"
+        line: "{{ item }}"
+      with_items:
+        - "DBHost=localhost"
+        - "DBUser=zabbix"
+        - "DBPassword=zabbix"
+        - "DBName=zabbix"
 
     - name: autostart zabbix-server
       systemd:
