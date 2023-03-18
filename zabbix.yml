@@ -30,12 +30,12 @@
       shell: mysql < /home/{{user}}/create_db.sql
       ignore_errors: true
 
-    - name: fill lam
-      shell: "{{item}}"
-      with_items:
-      - zcat /usr/share/zabbix-server-mysql/schema.sql.gz | mysql -u zabbix -p zabbix
-      - zcat /usr/share/zabbix-server-mysql/images.sql.gz | mysql -u abbix -p zabbix
-      - zcat /usr/share/zabbix-server-mysql/data.sql.gz | mysql -u zabbix -p zabbix
+    # - name: fill lam
+    #   shell: "{{item}}"
+    #   with_items:
+    #   - zcat /usr/share/zabbix-server-mysql/schema.sql.gz | mysql -u zabbix -p zabbix
+    #   - zcat /usr/share/zabbix-server-mysql/images.sql.gz | mysql -u abbix -p zabbix
+    #   - zcat /usr/share/zabbix-server-mysql/data.sql.gz | mysql -u zabbix -p zabbix
 
     - name: add lines to config
       lineinfile:
