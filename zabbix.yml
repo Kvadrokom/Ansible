@@ -38,15 +38,13 @@
     #   - zcat /usr/share/zabbix-server-mysql/data.sql.gz | mysql -u zabbix -p zabbix
 
     - name: add lines to config
-      lineinfile:
-        path: /etc/zabbix/zabbix_server.conf
-        state: present
-        line: "{{ item }}"
-      with_items:
-        - "DBHost=localhost"
-        - "DBUser=zabbix"
-        - "DBPassword=zabbix"
-        - "DBName=zabbix"
+      blockinfile:
+      dest: /etc/zabbix/zabbix_server.conf
+      block: |
+      DBHost=localhost
+      DBUser=zabbix
+      DBPassword=zabbix
+      DBName=zabbix
 
     - name: autostart zabbix-server
       systemd:
