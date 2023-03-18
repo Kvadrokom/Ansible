@@ -72,9 +72,8 @@
 
     - name: create vizard file
       file:
-        name: touch
         path: /etc/zabbix/zabbix.conf.php
-        state: present
+        state: touch
         owner: www-data
 
   handlers:
