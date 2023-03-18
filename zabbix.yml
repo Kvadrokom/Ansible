@@ -81,9 +81,3 @@
       systemd:
         name: apache2
         state: reloaded
-
-    
-        
-
-
-
