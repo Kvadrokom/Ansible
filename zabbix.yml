@@ -39,12 +39,12 @@
 
     - name: add lines to config
       blockinfile:
-      dest: /etc/zabbix/zabbix_server.conf
-      block: |
-      DBHost=localhost
-      DBUser=zabbix
-      DBPassword=zabbix
-      DBName=zabbix
+        dest: /etc/zabbix/zabbix_server.conf
+        block: |
+          DBHost=localhost
+          DBUser=zabbix
+          DBPassword=zabbix
+          DBName=zabbix
 
     - name: autostart zabbix-server
       systemd:
