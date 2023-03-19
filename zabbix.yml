@@ -75,6 +75,13 @@
         state: touch
         owner: www-data
 
+    - name: insert timezone
+      lineinfile:
+        path: /etc/apache2/conf-available/zabbix-frontend-php.conf
+        line: "        php_value date.timezone UTC"
+        state: present
+        insertafter: '        # php_value date.timezone Europe/Riga'
+
   handlers:
     - name: Restart apache
       systemd:
