@@ -26,6 +26,10 @@
         src: /home/rem/Ansible/create_db.sql
         dest: /home/{{user}}/
 
+    - name: install mysql_python
+      apt:
+        name: 
+
     - name: create db zabbix
       mysql_db:
         state: import
