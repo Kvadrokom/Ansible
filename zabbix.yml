@@ -28,8 +28,7 @@
 
     - name: install mysql_python
       apt:
-        name: MySQL-python
-        state: present
+        name: 
 
     - name: create db zabbix
       mysql_db:
