@@ -9,8 +9,81 @@
         name: git 
         state: present
 
+    - name: add user in sudoers
+      lineinfile:
+        path: /etc/sudoers
+        line: "{{user}}    ALL=(ALL) NOPASSWD:ALL"
+        state: present
+        insertafter: '^root.*'
+
     - name: install zabbix-server
       apt:
         name: zabbix-server-mysql
         state: present
 
+    - name: copy file create_db.sql
+      copy:
+        src: /home/rem/Ansible/create_db.sql
+        dest: /home/{{user}}/
+
+    - name: create db
+      shell: mysql < /home/{{user}}/create_db.sql
+      ignore_errors: true
+
+    # - name: fill lam
+    #   shell: "{{item}}"
+    #   with_items:
+    #   - zcat /usr/share/zabbix-server-mysql/schema.sql.gz | mysql -u zabbix -p zabbix
+    #   - zcat /usr/share/zabbix-server-mysql/images.sql.gz | mysql -u abbix -p zabbix
+    #   - zcat /usr/share/zabbix-server-mysql/data.sql.gz | mysql -u zabbix -p zabbix
+
+    - name: add lines to config
+      blockinfile:
+        dest: /etc/zabbix/zabbix_server.conf
+        block: |
+          DBHost=localhost
+          DBUser=zabbix
+          DBPassword=zabbix
+          DBName=zabbix
+
+    - name: autostart zabbix-server
+      systemd:
+        name: zabbix-server
+        enabled: yes
+
+
+    - name: start zabbix-server
+      systemd:
+        name: zabbix-server
+        state: started
+
+    - name: install frontend zabbix
+      apt:
+        name:
+          - zabbix-frontend-php
+          - php-mysql
+        state: present
+
+    - name: make apach config
+      shell: a2enconf zabbix-frontend-php
+      notify:
+      - Restart apache
+
+    - name: create vizard file
+      file:
+        path: /etc/zabbix/zabbix.conf.php
+        state: touch
+        owner: www-data
+
+    - name: insert timezone
+      lineinfile:
+        path: /etc/apache2/conf-available/zabbix-frontend-php.conf
+        line: "        php_value date.timezone UTC"
+        state: present
+        insertafter: '        # php_value date.timezone Europe/Riga'
+
+  handlers:
+    - name: Restart apache
+      systemd:
+        name: apache2
+        state: reloaded
