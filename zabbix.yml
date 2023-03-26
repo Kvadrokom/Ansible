@@ -26,9 +26,15 @@
         src: /home/rem/Ansible/create_db.sql
         dest: /home/{{user}}/
 
-    - name: create db
-      shell: mysql < /home/{{user}}/create_db.sql
-      ignore_errors: true
+    - name: create db zabbix
+      mysql_db:
+        state: import
+        name: all
+        target: /home/{{user}}/create_db.sql
+
+    # - name: create db
+    #   shell: mysql < /home/{{user}}/create_db.sql
+    #   ignore_errors: true
 
     # - name: fill lam
     #   shell: "{{item}}"
