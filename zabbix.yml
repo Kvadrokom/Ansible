@@ -26,6 +26,12 @@
         src: /home/rem/Ansible/create_db.sql
         dest: /home/{{user}}/
 
+    - name: Example using login_unix_socket to connect to server
+      mysql_user:
+        name: zabbix
+        password: zabbix
+        login_unix_socket: /var/run/mysqld/mysqld.sock
+
     # - name: install mysql_python
     #   apt:
     #     name: MySQL-python
