@@ -40,7 +40,7 @@
     - name: fill .my.conf file
       blockinfile:
         dest: ~/.my.conf
-        blocl: |
+        block: |
           [client]
           user=zabbix
           password=zabbix
