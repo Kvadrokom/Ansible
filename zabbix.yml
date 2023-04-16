@@ -32,10 +32,18 @@
         password: zabbix
         login_unix_socket: /var/run/mysqld/mysqld.sock
 
-    # - name: install mysql_python
-    #   apt:
-    #     name: MySQL-python
-    #     state: present
+    - name: Create .my.conf file
+      file:
+        path: ~/.my.conf
+        state: touch
+
+    - name: fill .my.conf file
+      blockinfile:
+        dest: ~/.my.conf
+        blocl: |
+          [client]
+          user=zabbix
+          password=zabbix
 
     - name: create db zabbix
       mysql_db:
