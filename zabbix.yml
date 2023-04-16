@@ -32,22 +32,22 @@
     #     password: zabbix
     #     login_unix_socket: /var/run/mysqld/mysqld.sock
 
-    - name: Create .my.conf file
+    - name: Create .my.cnf file
       file:
-        path: ~/.my.conf
+        path: ~/.my.cnf
         state: touch
 
-    - name: fill .my.conf file
+    - name: fill .my.cnf file
       blockinfile:
-        dest: ~/.my.conf
+        dest: ~/.my.cnf
         block: |
           [client]
-          user=root
+          user=zabbix
           password=zabbix
-          
+
           [mysql]
           user=root
-          password=zabbix
+          password=root
 
     - name: create db zabbix
       mysql_db:
