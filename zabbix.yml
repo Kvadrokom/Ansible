@@ -37,13 +37,17 @@
         path: ~/.my.cnf
         state: touch
 
-    - name: fill .my.cnf file
-      blockinfile:
-        dest: ~/.my.cnf
-        block: |
-          [mysql]
-          user=root
-          password=root
+    # - name: fill .my.cnf file
+    #   blockinfile:
+    #     dest: ~/.my.cnf
+    #     block: |
+    #       [client]
+    #       user=zabbix
+    #       password=zabbix
+
+    #       [mysql]
+    #       user=root
+    #       password=root
 
     - name: create db zabbix
       mysql_db:
