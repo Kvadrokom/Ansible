@@ -41,10 +41,6 @@
       blockinfile:
         dest: ~/.my.cnf
         block: |
-          [client]
-          user=zabbix
-          password=zabbix
-
           [mysql]
           user=root
           password=root
