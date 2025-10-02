@@ -1,0 +1,72 @@
+---
+---
+- name: Install git
+  apt:
+    name: git
+    state: present
+
+- name: Add user in sudoers
+  lineinfile:
+    path: /etc/sudoers
+    line: "{{ user }}    ALL=(ALL) NOPASSWD:ALL"
+    state: present
+    insertafter: '^root.*'
+
+- name: Install zabbix-server
+  apt:
+    name: zabbix-server-mysql
+    state: present
+
+- name: Copy file create_db.sql
+  copy:
+    src: files/create_db.sql
+    dest: /home/{{ user }}/create_db.sql
+
+- name: Create db
+  shell: mysql < /home/{{ user }}/create_db.sql
+  ignore_errors: true
+
+- name: Add lines to config
+  blockinfile:
+    dest: /etc/zabbix/zabbix_server.conf
+    block: |
+      DBHost=localhost
+      DBUser=zabbix
+      DBPassword=zabbix
+      DBName=zabbix
+
+- name: Autostart zabbix-server
+  systemd:
+    name: zabbix-server
+    enabled: yes
+
+- name: Start zabbix-server
+  systemd:
+    name: zabbix-server
+    state: started
+
+- name: Install frontend zabbix
+  apt:
+    name:
+      - zabbix-frontend-php
+      - php-mysql
+    state: present
+
+- name: Make Apache config
+  shell: a2enconf zabbix-frontend-php
+  notify:
+    - Restart apache
+
+- name: Create wizard file
+  file:
+    path: /etc/zabbix/zabbix.conf.php
+    state: touch
+    owner: www-data
+
+- name: Insert timezone
+  lineinfile:
+    path: /etc/apache2/conf-available/zabbix-frontend-php.conf
+    line: "        php_value date.timezone UTC"
+    state: present
+    insertafter: '        # php_value date.timezone Europe/Riga'
+# tasks file for zabbix

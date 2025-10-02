@@ -1,0 +1,24 @@
+---
+- name: Ensure Git is installed
+  apt:
+    name: git
+    state: present
+
+- name: Clone or Update Repository
+  git:
+    repo: "{{ github_repo }}"
+    dest: "{{ local_dir }}"
+    version: master
+    force: no
+
+- name: Stop reminder service
+  systemd:
+    name: reminder
+    state: stopped
+
+- name: Start reminder service
+  systemd:
+    name: reminder
+    enabled: yes
+    state: started
+# tasks file for reminder
