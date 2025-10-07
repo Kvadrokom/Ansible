@@ -1,0 +1,6 @@
+---
+- name: Удаляем папку с файлами git
+  file:
+    path: "{{ deploy_dir }}"
+    state: absent
+# handlers file for reminder

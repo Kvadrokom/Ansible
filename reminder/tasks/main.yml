@@ -1,0 +1,33 @@
+---
+- name: Ensure Git is installed
+  apt:
+    name: git
+    state: present
+  notify: Удаляем папку с файлами git  
+
+- name: Clone or Update Repository
+  git:
+    repo: "{{ github_repo }}"
+    dest: "{{ deploy_dir }}"
+    version: master
+    force: no
+
+- name: Копируем файлы в целевую директорию
+  shell:
+    cp "{{ item.src }}" "{{ item.dest }}"
+  with_items:
+    - { src: "{{ deploy_dir }}/reminder.py", dest: "{{dest_dir}}" }
+    - { src: "{{ deploy_dir }}/reminder_utils.py", dest: "{{dest_dir}}" }
+  notify: Удаляем папку с файлами git
+
+- name: Stop reminder service
+  systemd:
+    name: reminder
+    state: stopped
+
+- name: Start reminder service
+  systemd:
+    name: reminder
+    enabled: yes
+    state: started
+# tasks file for reminder

@@ -63,7 +63,7 @@
     #   shell: "{{item}}"
     #   with_items:
     #   - zcat /usr/share/zabbix-server-mysql/schema.sql.gz | mysql -u zabbix -p zabbix
-    #   - zcat /usr/share/zabbix-server-mysql/images.sql.gz | mysql -u abbix -p zabbix
+    #   - zcat /usr/share/zabbix-server-mysql/images.sql.gz | mysql -u zabbix -p zabbix
     #   - zcat /usr/share/zabbix-server-mysql/data.sql.gz | mysql -u zabbix -p zabbix
 
     - name: add lines to config
@@ -116,3 +116,6 @@
       systemd:
         name: apache2
         state: reloaded
+
+#Первичная настройка по адресу:
+#localhost/zabbix/setup.php

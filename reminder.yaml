@@ -1,0 +1,5 @@
+- name: Deploy reminder using role
+  hosts: test
+  become: true
+  roles:
+    - reminder

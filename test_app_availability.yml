@@ -1,0 +1,26 @@
+---
+- name: Test application availability
+  hosts: telebot_host 
+  gather_facts: false
+  tasks:
+    - name: Ping the server
+      ping:
+
+    - name: Check port availability
+      wait_for:
+        port: 80
+        delay: 5
+        timeout: 10
+      ignore_errors: true
+
+    - name: Verify HTTP endpoint
+      uri:
+        url: "http://{{ inventory_hostname }}:80/"
+        method: GET
+        validate_certs: no
+      register: response
+      ignore_errors: true
+
+    - name: Report results
+      debug:
+        msg: "Server {{ inventory_hostname }} responded with code {{ response.status }}"
