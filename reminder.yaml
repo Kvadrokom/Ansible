@@ -1,5 +1,17 @@
-- name: Deploy reminder using role
-  hosts: test
+---
+- name: Deploy reminder based on environment type
+  hosts: all
   become: true
+  gather_facts: false
+  vars:
+    stand_type: "{{ lookup('env','STAND_TYPE') | default('test') }}"  # переменная окружения или заданная по умолчанию
+
+  pre_tasks:
+    - name: Set target group dynamically
+      set_fact:
+        target_group: "{% if stand_type == 'prom' %} telebot_host {% else %} test_host {% endif %}"
+
   roles:
-    - reminder
+    - role: reminder
+      delegate_to: "{{ groups[target_group][0] }}"  # делегируем выполнение первому хосту выбранной группы
+      run_once: yes
