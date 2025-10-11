@@ -14,6 +14,10 @@
         dest_dir:  "{% if stand_type == 'prom' %} /root/reminder {% endif %}"
         git_branch: "{% if stand_type == 'prom' %} master {% endif %}"
 
+    - name: Debugging multiple variables
+      debug:
+        msg: "target_group={{ target_group }} | deploy_dir={{ deploy_dir }} | dest_dir={{ dest_dir }}"
+
   roles:
     - role: reminder
       delegate_to: "{{ groups[target_group][0] }}"  # делегируем выполнение первому хосту выбранной группы
