@@ -7,9 +7,12 @@
     stand_type: "{{ lookup('env','STAND_TYPE') | default('test') }}"  # переменная окружения или заданная по умолчанию
 
   pre_tasks:
-    - name: Set target group dynamically
+    - name: Set target group dynamically and directories dynamically
       set_fact:
         target_group: "{% if stand_type == 'prom' %} telebot_host {% else %} test_host {% endif %}"
+        deploy_dir: "{% if stand_type == 'prom' %} /root/deploy {% endif %}"
+        dest_dir:  "{% if stand_type == 'prom' %} /root/reminder {% endif %}"
+        git_branch: "{% if stand_type == 'prom' %} master {% endif %}"
 
   roles:
     - role: reminder

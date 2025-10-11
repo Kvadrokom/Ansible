@@ -9,7 +9,7 @@
   git:
     repo: "{{ github_repo }}"
     dest: "{{ deploy_dir }}"
-    version: master
+    version: "{{ git_branch }}"
     force: no
 
 - name: Копируем файлы в целевую директорию
