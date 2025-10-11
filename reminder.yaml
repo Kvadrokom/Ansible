@@ -10,9 +10,9 @@
     - name: Set target group dynamically and directories dynamically
       set_fact:
         target_group: "{% if stand_type == 'prom' %} telebot_host {% else %} test_host {% endif %}"
-        deploy_dir: "{% if stand_type == 'prom' %} /root/deploy {% endif %}"
-        dest_dir:  "{% if stand_type == 'prom' %} /root/reminder {% endif %}"
-        git_branch: "{% if stand_type == 'prom' %} master {% endif %}"
+        deploy_dir: "{% if stand_type == 'prom' %} /root/deploy {% else %} /home/greenbec/deploy {% endif %}"
+        dest_dir:  "{% if stand_type == 'prom' %} /root/reminder {% else %} /home/greenbec/reminder {% endif %}"
+        git_branch: "{% if stand_type == 'prom' %} master {% else %} develop {% endif %}"
 
     - name: Debugging multiple variables
       debug:
