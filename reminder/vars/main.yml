@@ -1,7 +1,7 @@
 ---
-user: greenbec
-github_repo: "https://github.com/Kvadrokom/reminder.git"
-deploy_dir: "/home/greenbec/deploy"
-dest_dir: "/home/greenbec/reminder"
-git_branch: "develop"
+  user: greenbec
+  github_repo: "https://github.com/Kvadrokom/reminder.git"
+  deploy_dir: "/home/greenbec/deploy"
+  dest_dir: "/home/greenbec/reminder"
+  git_branch: "develop"
 # vars file for reminder
