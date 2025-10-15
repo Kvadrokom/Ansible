@@ -32,10 +32,26 @@
     state: started
   register: service_status
 
+- name: Wait for service to fully initialize
+  wait_for:
+    timeout: 10
+  when: service_status.changed
+
+
+- name: Check service status after delay
+  systemd:
+    name: reminder
+  register: service_status
+
+
+  #- name: Show ALL service_status data
+  #  debug:
+  #    var: service_status
+
 - name: Verify service is active and running
   assert:
     that:
-      - service_status.status.ActiveState == 'active'
-      - service_status.status.SubState == 'running'
-    msg: "Service reminder is not running. Current status: {{ service_status.status.ActiveState }}"
+    - service_status.status.ActiveState == 'active'
+    - service_status.status.SubState == 'running'
+    msg: "Service reminder is not running. Status: {{ service_status.status }}"  
 # tasks file for reminder
