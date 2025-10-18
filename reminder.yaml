@@ -4,7 +4,7 @@
   become: true
   gather_facts: false
   vars:
-    stand_type: "{{ lookup('env','STAND_TYPE') | default('test') }}"  # переменная окружения или заданная по умолчанию
+    stand_type: "{{ STAND_TYPE | default('test') }}"  # переменная ansible или заданная по умолчанию
 
   pre_tasks:
     - name: Set target group dynamically
