@@ -25,7 +25,7 @@
 
     - name: Debugging multiple variables
       debug:
-        msg: "target_group={{ target_group }} | deploy_dir={{ deploy_dir }} | dest_dir={{ dest_dir }}"
+        msg: "target_group={{ target_group }} | deploy_dir={{ deploy_dir }} | dest_dir={{ dest_dir }} | git_branch={{ git_branch:}}"
 
   roles:
     - role: reminder
