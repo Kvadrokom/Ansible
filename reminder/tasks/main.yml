@@ -18,6 +18,7 @@
   with_items:
     - { src: "{{ deploy_dir }}/reminder.py", dest: "{{dest_dir}}" }
     - { src: "{{ deploy_dir }}/reminder_utils.py", dest: "{{dest_dir}}" }
+    - { src: "{{ deploy_dir }}/bot_logger.py", dest: "{{dest_dir}}" }
   notify: Удаляем папку с файлами git
 
 - name: Stop reminder service
