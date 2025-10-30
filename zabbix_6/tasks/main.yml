@@ -63,10 +63,10 @@
       value: localhost
     notify: Restart Zabbix server
 
-  - name: Enable Apache modules
-    a2enmod:
-      name: rewrite headers ssl alias proxy proxy_http
-      state: present
+  # - name: Enable Apache modules
+  #   a2enmod:
+  #     name: rewrite headers ssl alias proxy proxy_http
+  #     state: present
 
   - name: Configure PHP settings
     ini_file:
@@ -75,7 +75,7 @@
       option: date.timezone
       value: Europe/Moscow
     notify: Reload Apache
-    
+
   - name: Restart services
     meta: flush_handlers
 
