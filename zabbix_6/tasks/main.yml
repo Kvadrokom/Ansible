@@ -75,17 +75,9 @@
       option: date.timezone
       value: Europe/Moscow
     notify: Reload Apache
-
+    
   - name: Restart services
     meta: flush_handlers
 
-    handlers:
-      - name: Restart Zabbix server
-        service:
-          name: zabbix-server
-          state: restarted    
-      - name: Reload Apache
-        service:
-          name: apache2
-          state: reloaded---
+---
 # tasks file for zabbix_6

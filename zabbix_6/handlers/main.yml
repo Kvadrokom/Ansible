@@ -1,2 +1,10 @@
 ---
+- name: Restart Zabbix server
+  service:
+    name: zabbix-server
+    state: restarted    
+- name: Reload Apache
+  service:
+    name: apache2
+    state: reloaded
 # handlers file for zabbix_6
