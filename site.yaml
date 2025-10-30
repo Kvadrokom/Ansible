@@ -1,6 +1,6 @@
 ---
-- name: Deploy Zabbix using role
-  hosts: zabbix
+- name: Deploy Zabbix 6 using role
+  hosts: monitor
   become: true
   roles:
-    - zabbix
+    - zabbix_6

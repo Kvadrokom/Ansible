@@ -1,2 +1,91 @@
 ---
+  - name: Update package repositories
+    apt:
+      update_cache: yes
+  - name: Add Zabbix repository
+    apt_repository:
+      repo: "deb http://repo.zabbix.com/zabbix/{{ zabbix_version }}/ubuntu focal main"
+      state: present
+
+  - name: Install required packages
+    apt:
+      name:
+        - zabbix-server-mysql
+        - zabbix-web-mysql
+        - zabbix-apache-conf
+        - zabbix-agent
+        - mariadb-server
+      state: present
+
+  - name: Configure MariaDB
+    shell: >
+      mysql_secure_installation <<EOF
+      n
+      {{ mysql_root_password }}
+      {{ mysql_root_password }}
+      y
+      y
+      y
+      y
+      EOF
+
+  - name: Create Zabbix database
+    mysql_db:
+      name: zabbix
+      encoding: utf8mb4
+      collation: utf8mb4_unicode_ci
+      login_user: root
+      login_password: "{{ mysql_root_password }}"
+      state: present
+
+  - name: Create Zabbix DB user
+    mysql_user:
+      name: zabbix
+      password: "{{ zabbix_db_password }}"
+      priv: "zabbix.*:ALL"
+      login_user: root
+      login_password: "{{ mysql_root_password }}"
+      state: present
+
+  - name: Load initial schema into Zabbix database
+    mysql_db:
+      name: zabbix
+      state: import
+      target: /usr/share/doc/zabbix-server-mysql/create.sql.gz
+      login_user: root
+      login_password: "{{ mysql_root_password }}"
+
+  - name: Configure Zabbix server
+    ini_file:
+      path: /etc/zabbix/zabbix_server.conf
+      section: DEFAULT
+      option: DBHost
+      value: localhost
+    notify: Restart Zabbix server
+
+  - name: Enable Apache modules
+    a2enmod:
+      name: rewrite headers ssl alias proxy proxy_http
+      state: present
+
+  - name: Configure PHP settings
+    ini_file:
+      path: /etc/php/7.4/apache2/php.ini
+      section: php
+      option: date.timezone
+      value: Europe/Moscow
+    notify: Reload Apache
+    
+  - name: Restart services
+    meta: flush_handlers
+
+    handlers:
+      - name: Restart Zabbix server
+        service:
+          name: zabbix-server
+          state: restarted    
+      - name: Reload Apache
+        service:
+          name: apache2
+          state: reloaded---
 # tasks file for zabbix_6
