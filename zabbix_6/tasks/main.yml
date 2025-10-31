@@ -2,6 +2,9 @@
   - name: Update package repositories
     apt:
       update_cache: yes
+      update_cache_exclude:
+      - bullseye-backports
+      
   - name: Add Zabbix repository
     apt_repository:
       repo: "deb http://repo.zabbix.com/zabbix/{{ zabbix_version }}/ubuntu focal main"
@@ -78,6 +81,5 @@
     
   - name: Restart services
     meta: flush_handlers
-
 ---
 # tasks file for zabbix_6

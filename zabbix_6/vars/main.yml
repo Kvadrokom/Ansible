@@ -1,2 +1,5 @@
 ---
+mysql_root_password: "root"
+zabbix_db_password: "zabbix"
+zabbix_version: "6.0"
 # vars file for zabbix_6
