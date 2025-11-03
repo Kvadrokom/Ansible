@@ -86,7 +86,7 @@
     mysqladmin -u root status 2>/dev/null && echo "no_password" || mysqladmin -u root -p"{{ mysql_root_password }}" status 2>/dev/null && echo "has_password" || echo "error"
   register: mysql_root_check
   changed_when: false
-  ignore_errors: true
+  ignore_errors: yes
 
 - name: Set MySQL root password if not set
   mysql_user:
@@ -110,4 +110,152 @@
     state: present
   loop:
     - 127.0.0.1
-   
+    - ::1
+  when: "'no_password' in mysql_root_check.stdout or 'has_password' in mysql_root_check.stdout"
+
+- name: Remove anonymous MySQL users
+  mysql_user:
+    name: ''
+    host_all: yes
+    state: absent
+    login_user: root
+    login_password: "{{ mysql_root_password }}"
+
+- name: Remove test database
+  mysql_db:
+    name: test
+    state: absent
+    login_user: root
+    login_password: "{{ mysql_root_password }}"
+
+- name: Create Zabbix database
+  mysql_db:
+    name: "{{ zabbix_db_name | default('zabbix') }}"
+    encoding: utf8mb4
+    collation: utf8mb4_bin
+    login_user: root
+    login_password: "{{ mysql_root_password }}"
+    state: present
+
+- name: Create Zabbix DB user
+  mysql_user:
+    name: "{{ zabbix_db_user | default('zabbix') }}"
+    password: "{{ zabbix_db_password }}"
+    host: localhost
+    priv: "{{ zabbix_db_name | default('zabbix') }}.*:ALL"
+    login_user: root
+    login_password: "{{ mysql_root_password }}"
+    state: present
+
+- name: Check if Zabbix database tables exist
+  shell: |
+    mysql -u root -p"{{ mysql_root_password }}" -e "SHOW TABLES FROM {{ zabbix_db_name | default('zabbix') }}" | grep -q users
+  register: zabbix_tables_check
+  changed_when: false
+  ignore_errors: yes
+  failed_when: false
+
+- name: Check if schema file exists
+  stat:
+    path: /usr/share/zabbix-sql-scripts/mysql/server.sql.gz
+  register: schema_file
+
+- name: Extract and load schema (method 1 - using shell)
+  shell: |
+    gunzip -c /usr/share/zabbix-sql-scripts/mysql/server.sql.gz | mysql -u root -p"{{ mysql_root_password }}" {{ zabbix_db_name | default('zabbix') }}
+  when: 
+    - zabbix_tables_check.rc != 0
+    - schema_file.stat.exists
+  args:
+    executable: /bin/bash
+  register: schema_load_method1
+
+- name: Alternative schema load (method 2 - if gunzip not available)
+  shell: |
+    zcat /usr/share/zabbix-sql-scripts/mysql/server.sql.gz | mysql -u root -p"{{ mysql_root_password }}" {{ zabbix_db_name | default('zabbix') }}
+  when: 
+    - zabbix_tables_check.rc != 0
+    - schema_file.stat.exists
+    - schema_load_method1.failed | default(true)
+  args:
+    executable: /bin/bash
+  register: schema_load_method2
+
+- name: Final schema load attempt (method 3 - using mysql_db)
+  mysql_db:
+    name: "{{ zabbix_db_name | default('zabbix') }}"
+    state: import
+    target: /usr/share/zabbix-sql-scripts/mysql/server.sql.gz
+    login_user: root
+    login_password: "{{ mysql_root_password }}"
+  when: 
+    - zabbix_tables_check.rc != 0
+    - schema_file.stat.exists
+    - schema_load_method2 is defined and schema_load_method2.failed | default(true)
+
+- name: Configure Zabbix server database settings
+  lineinfile:
+    path: /etc/zabbix/zabbix_server.conf
+    regexp: "^{{ item.option }}=.*"
+    line: "{{ item.option }}={{ item.value }}"
+    state: present
+  loop:
+    - { option: DBHost, value: localhost }
+    - { option: DBName, value: "{{ zabbix_db_name | default('zabbix') }}" }
+    - { option: DBUser, value: "{{ zabbix_db_user | default('zabbix') }}" }
+    - { option: DBPassword, value: "{{ zabbix_db_password }}" }
+  notify: Restart Zabbix server
+
+- name: Configure PHP timezone for Apache
+  lineinfile:
+    path: /etc/php/7.4/apache2/php.ini
+    regexp: "^;?date.timezone.*"
+    line: "date.timezone = {{ php_timezone | default('Europe/Moscow') }}"
+    state: present
+  notify: Reload Apache
+
+- name: Configure Zabbix agent
+  lineinfile:
+    path: /etc/zabbix/zabbix_agentd.conf
+    regexp: "^Server=.*"
+    line: "Server=127.0.0.1"
+    state: present
+  notify: Restart Zabbix agent
+
+- name: Enable Apache site for Zabbix
+  file:
+    src: /etc/zabbix/apache.conf
+    dest: /etc/apache2/sites-available/zabbix.conf
+    state: link
+  notify: Reload Apache
+
+- name: Enable Zabbix site in Apache
+  apache2_module:
+    name: rewrite
+    state: present
+  notify: Restart Apache
+
+- name: Enable Zabbix Apache site
+  command:
+    cmd: a2ensite zabbix.conf
+    creates: /etc/apache2/sites-enabled/zabbix.conf
+  notify: Restart Apache
+
+- name: Disable default Apache site
+  command:
+    cmd: a2dissite 000-default.conf
+    removes: /etc/apache2/sites-enabled/000-default.conf
+  notify: Restart Apache
+
+- name: Ensure services are enabled and started
+  systemd:
+    name: "{{ item }}"
+    state: started
+    enabled: yes
+  loop:
+    - zabbix-server
+    - zabbix-agent
+    - apache2
+
+- name: Restart services
+  meta: flush_handlers
