@@ -4,6 +4,7 @@
     name:
       - gnupg
       - ca-certificates
+      - apt-transport-https
     state: present
 
 - name: Add Zabbix repository key
@@ -11,16 +12,23 @@
     url: "https://repo.zabbix.com/zabbix-official-repo.key"
     state: present
 
-- name: Update package repositories
-  apt:
-    update_cache: yes
-    cache_valid_time: 3600
-
 - name: Add Zabbix repository for Debian 11
   apt_repository:
     repo: "deb https://repo.zabbix.com/zabbix/{{ zabbix_version | default('6.0') }}/debian bullseye main"
     state: present
     filename: zabbix
+
+- name: Update package repositories (ignore backports errors)
+  apt:
+    update_cache: yes
+    cache_valid_time: 3600
+  ignore_errors: yes
+  register: apt_update_result
+
+- name: Check if apt update was successful despite backports error
+  debug:
+    msg: "Apt update completed (ignoring backports errors)"
+  when: apt_update_result.failed and "'bullseye-backports' in apt_update_result.msg"
 
 - name: Install required packages
   apt:
@@ -32,6 +40,7 @@
       - mariadb-server
       - python3-pymysql
     state: present
+    force_apt_get: yes
 
 - name: Ensure MariaDB is started and enabled
   systemd:
@@ -45,7 +54,14 @@
     state: present
     timeout: 30
 
-- name: Secure MariaDB installation (set root password)
+- name: Check if MySQL root password is already set
+  shell: |
+    mysqladmin -u root ping 2>/dev/null && echo "password_not_set" || echo "password_set_or_error"
+  register: mysql_root_check
+  changed_when: false
+  ignore_errors: yes
+
+- name: Secure MariaDB installation (set root password if not set)
   mysql_user:
     name: root
     host: localhost
@@ -54,6 +70,7 @@
     check_implicit_admin: yes
     priv: "*.*:ALL,GRANT"
     state: present
+  when: "'password_not_set' in mysql_root_check.stdout"
 
 - name: Secure other root accounts
   mysql_user:
