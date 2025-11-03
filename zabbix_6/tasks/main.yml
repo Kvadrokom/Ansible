@@ -147,15 +147,42 @@
     login_password: "{{ mysql_root_password }}"
     state: present
 
-- name: Check if schema already loaded
+- name: Check if schema file exists
   stat:
-    path: /var/lib/mysql/{{ zabbix_db_name | default('zabbix') }}/users.ibd
-  register: zabbix_schema_check
+    path: /usr/share/zabbix-sql-scripts/mysql/server.sql.gz
+  register: schema_file
 
-- name: Load initial schema into Zabbix database
-  command: >
+- name: Extract and load schema (method 1 - using shell)
+  shell: |
+    gunzip -c /usr/share/zabbix-sql-scripts/mysql/server.sql.gz | mysql -u root -p"{{ mysql_root_password }}" {{ zabbix_db_name | default('zabbix') }}
+  when: 
+    - not zabbix_schema_check.stat.exists
+    - schema_file.stat.exists
+  args:
+    executable: /bin/bash
+
+- name: Alternative schema load (method 2 - if gunzip not available)
+  shell: |
     zcat /usr/share/zabbix-sql-scripts/mysql/server.sql.gz | mysql -u root -p"{{ mysql_root_password }}" {{ zabbix_db_name | default('zabbix') }}
-  when: not zabbix_schema_check.stat.exists
+  when: 
+    - not zabbix_schema_check.stat.exists
+    - schema_file.stat.exists
+    - schema_load_method1.failed | default(true)
+  args:
+    executable: /bin/bash
+  register: schema_load_method2
+
+- name: Final schema load attempt (method 3 - using mysql_db)
+  mysql_db:
+    name: "{{ zabbix_db_name | default('zabbix') }}"
+    state: import
+    target: /usr/share/zabbix-sql-scripts/mysql/server.sql.gz
+    login_user: root
+    login_password: "{{ mysql_root_password }}"
+  when: 
+    - not zabbix_schema_check.stat.exists
+    - schema_file.stat.exists
+    - schema_load_method2 is failed or schema_load_method2.failed | default(true)
 
 - name: Configure Zabbix server database settings
   lineinfile:
