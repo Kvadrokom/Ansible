@@ -1,10 +1,16 @@
 ---
 - name: Restart Zabbix server
-  service:
+  systemd:
     name: zabbix-server
-    state: restarted    
+    state: restarted
+
+- name: Restart Zabbix agent
+  systemd:
+    name: zabbix-agent
+    state: restarted
+
 - name: Reload Apache
-  service:
+  systemd:
     name: apache2
     state: reloaded
 # handlers file for zabbix_6

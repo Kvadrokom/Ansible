@@ -1,85 +1,151 @@
 ---
-  - name: Update package repositories
-    apt:
-      update_cache: yes
-      update_cache_exclude:
-      - bullseye-backports
-      
-  - name: Add Zabbix repository
-    apt_repository:
-      repo: "deb http://repo.zabbix.com/zabbix/{{ zabbix_version }}/ubuntu focal main"
-      state: present
+- name: Add Zabbix repository key
+  apt_key:
+    url: "http://repo.zabbix.com/zabbix-official-repo.key"
+    state: present
 
-  - name: Install required packages
-    apt:
-      name:
-        - zabbix-server-mysql
-        - zabbix-web-mysql
-        - zabbix-apache-conf
-        - zabbix-agent
-        - mariadb-server
-      state: present
+- name: Update package repositories
+  apt:
+    update_cache: yes
+    cache_valid_time: 3600
 
-  - name: Configure MariaDB
-    shell: >
-      mysql_secure_installation <<EOF
-      n
-      {{ mysql_root_password }}
-      {{ mysql_root_password }}
-      y
-      y
-      y
-      y
-      EOF
+- name: Add Zabbix repository
+  apt_repository:
+    repo: "deb http://repo.zabbix.com/zabbix/{{ zabbix_version | default('6.0') }}/debian bullseye main"
+    state: present
+    filename: zabbix
 
-  - name: Create Zabbix database
-    mysql_db:
-      name: zabbix
-      encoding: utf8mb4
-      collation: utf8mb4_unicode_ci
-      login_user: root
-      login_password: "{{ mysql_root_password }}"
-      state: present
+- name: Install required packages
+  apt:
+    name:
+      - zabbix-server-mysql
+      - zabbix-frontend-php
+      - zabbix-apache-conf
+      - zabbix-agent
+      - mariadb-server
+      - python3-pymysql
+    state: present
 
-  - name: Create Zabbix DB user
-    mysql_user:
-      name: zabbix
-      password: "{{ zabbix_db_password }}"
-      priv: "zabbix.*:ALL"
-      login_user: root
-      login_password: "{{ mysql_root_password }}"
-      state: present
+- name: Ensure MariaDB is started and enabled
+  systemd:
+    name: mariadb
+    state: started
+    enabled: yes
 
-  - name: Load initial schema into Zabbix database
-    mysql_db:
-      name: zabbix
-      state: import
-      target: /usr/share/doc/zabbix-server-mysql/create.sql.gz
-      login_user: root
-      login_password: "{{ mysql_root_password }}"
+- name: Secure MariaDB installation
+  mysql_user:
+    name: root
+    host: "{{ item }}"
+    password: "{{ mysql_root_password }}"
+    login_unix_socket: /var/run/mysqld/mysqld.sock
+    priv: "*.*:ALL,GRANT"
+    state: present
+  loop:
+    - localhost
+    - 127.0.0.1
+    - ::1
 
-  - name: Configure Zabbix server
-    ini_file:
-      path: /etc/zabbix/zabbix_server.conf
-      section: DEFAULT
-      option: DBHost
-      value: localhost
-    notify: Restart Zabbix server
+- name: Remove anonymous MySQL users
+  mysql_user:
+    name: ''
+    host_all: yes
+    state: absent
+    login_user: root
+    login_password: "{{ mysql_root_password }}"
 
-  # - name: Enable Apache modules
-  #   a2enmod:
-  #     name: rewrite headers ssl alias proxy proxy_http
-  #     state: present
+- name: Remove test database
+  mysql_db:
+    name: test
+    state: absent
+    login_user: root
+    login_password: "{{ mysql_root_password }}"
 
-  - name: Configure PHP settings
-    ini_file:
-      path: /etc/php/7.4/apache2/php.ini
-      section: php
-      option: date.timezone
-      value: Europe/Moscow
-    notify: Reload Apache
-    
-  - name: Restart services
-    meta: flush_handlers
----
-# tasks file for zabbix_6
+- name: Create Zabbix database
+  mysql_db:
+    name: "{{ zabbix_db_name | default('zabbix') }}"
+    encoding: utf8mb4
+    collation: utf8mb4_bin
+    login_user: root
+    login_password: "{{ mysql_root_password }}"
+    state: present
+
+- name: Create Zabbix DB user
+  mysql_user:
+    name: "{{ zabbix_db_user | default('zabbix') }}"
+    password: "{{ zabbix_db_password }}"
+    host: localhost
+    priv: "{{ zabbix_db_name | default('zabbix') }}.*:ALL"
+    login_user: root
+    login_password: "{{ mysql_root_password }}"
+    state: present
+
+- name: Check if schema already loaded
+  stat:
+    path: /var/lib/mysql/{{ zabbix_db_name | default('zabbix') }}/users.ibd
+  register: zabbix_schema_check
+
+- name: Load initial schema into Zabbix database
+  mysql_db:
+    name: "{{ zabbix_db_name | default('zabbix') }}"
+    state: import
+    target: /usr/share/zabbix-sql-scripts/mysql/server.sql.gz
+    login_user: root
+    login_password: "{{ mysql_root_password }}"
+  when: not zabbix_schema_check.stat.exists
+
+- name: Configure Zabbix server database settings
+  lineinfile:
+    path: /etc/zabbix/zabbix_server.conf
+    regexp: "^{{ item.option }}="
+    line: "{{ item.option }}={{ item.value }}"
+    state: present
+  loop:
+    - { option: DBHost, value: localhost }
+    - { option: DBName, value: "{{ zabbix_db_name | default('zabbix') }}" }
+    - { option: DBUser, value: "{{ zabbix_db_user | default('zabbix') }}" }
+    - { option: DBPassword, value: "{{ zabbix_db_password }}" }
+  notify: Restart Zabbix server
+
+- name: Configure PHP timezone for Apache
+  lineinfile:
+    path: /etc/php/7.4/apache2/php.ini
+    regexp: "^date.timezone"
+    line: "date.timezone = {{ php_timezone | default('Europe/Moscow') }}"
+    state: present
+  notify: Reload Apache
+
+- name: Configure PHP timezone for CLI (for zabbix-server)
+  lineinfile:
+    path: /etc/php/7.4/cli/php.ini
+    regexp: "^date.timezone"
+    line: "date.timezone = {{ php_timezone | default('Europe/Moscow') }}"
+    state: present
+
+- name: Configure Zabbix agent
+  lineinfile:
+    path: /etc/zabbix/zabbix_agentd.conf
+    regexp: "^Server="
+    line: "Server=127.0.0.1"
+    state: present
+  notify: Restart Zabbix agent
+
+- name: Configure Zabbix agent to allow server connections
+  lineinfile:
+    path: /etc/zabbix/zabbix_agentd.conf
+    regexp: "^ServerActive="
+    line: "ServerActive=127.0.0.1"
+    state: present
+  notify: Restart Zabbix agent
+
+- name: Ensure services are enabled and started
+  systemd:
+    name: "{{ item }}"
+    state: started
+    enabled: yes
+  loop:
+    - zabbix-server
+    - zabbix-agent
+    - apache2
+
+- name: Restart services
+  meta: flush_handlers
