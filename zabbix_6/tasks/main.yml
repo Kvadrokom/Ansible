@@ -1,7 +1,14 @@
 ---
+- name: Install dependencies for apt key
+  apt:
+    name:
+      - gnupg
+      - ca-certificates
+    state: present
+
 - name: Add Zabbix repository key
   apt_key:
-    url: "http://repo.zabbix.com/zabbix-official-repo.key"
+    url: "https://repo.zabbix.com/zabbix-official-repo.key"
     state: present
 
 - name: Update package repositories
@@ -9,9 +16,9 @@
     update_cache: yes
     cache_valid_time: 3600
 
-- name: Add Zabbix repository
+- name: Add Zabbix repository for Debian 11
   apt_repository:
-    repo: "deb http://repo.zabbix.com/zabbix/{{ zabbix_version | default('6.0') }}/debian bullseye main"
+    repo: "deb https://repo.zabbix.com/zabbix/{{ zabbix_version | default('6.0') }}/debian bullseye main"
     state: present
     filename: zabbix
 
@@ -32,16 +39,32 @@
     state: started
     enabled: yes
 
-- name: Secure MariaDB installation
+- name: Wait for MariaDB to start
+  wait_for:
+    path: /var/run/mysqld/mysqld.sock
+    state: present
+    timeout: 30
+
+- name: Secure MariaDB installation (set root password)
+  mysql_user:
+    name: root
+    host: localhost
+    password: "{{ mysql_root_password }}"
+    login_unix_socket: /var/run/mysqld/mysqld.sock
+    check_implicit_admin: yes
+    priv: "*.*:ALL,GRANT"
+    state: present
+
+- name: Secure other root accounts
   mysql_user:
     name: root
     host: "{{ item }}"
     password: "{{ mysql_root_password }}"
-    login_unix_socket: /var/run/mysqld/mysqld.sock
+    login_user: root
+    login_password: "{{ mysql_root_password }}"
     priv: "*.*:ALL,GRANT"
     state: present
   loop:
-    - localhost
     - 127.0.0.1
     - ::1
 
@@ -109,17 +132,10 @@
 - name: Configure PHP timezone for Apache
   lineinfile:
     path: /etc/php/7.4/apache2/php.ini
-    regexp: "^date.timezone"
+    regexp: "^;?date.timezone"
     line: "date.timezone = {{ php_timezone | default('Europe/Moscow') }}"
     state: present
   notify: Reload Apache
-
-- name: Configure PHP timezone for CLI (for zabbix-server)
-  lineinfile:
-    path: /etc/php/7.4/cli/php.ini
-    regexp: "^date.timezone"
-    line: "date.timezone = {{ php_timezone | default('Europe/Moscow') }}"
-    state: present
 
 - name: Configure Zabbix agent
   lineinfile:
