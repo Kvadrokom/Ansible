@@ -1,39 +1,13 @@
 ---
-- name: Install dependencies for apt key
+- name: Install dependencies
   apt:
     name:
       - gnupg
       - ca-certificates
       - apt-transport-https
+      - locales
+      - locales-all
     state: present
-
-- name: Temporarily disable problematic repositories
-  block:
-    - name: Comment out bullseye-backports in sources.list
-      replace:
-        path: /etc/apt/sources.list
-        regexp: '^deb.*bullseye-backports'
-        replace: '# \g<0>'
-      register: backports_disabled
-
-    - name: Comment out bullseye-backports in sources.list.d files
-      find:
-        paths: /etc/apt/sources.list.d
-        patterns: "*.list"
-        contains: "bullseye-backports"
-      register: backports_files
-
-    - name: Disable backports in found files
-      replace:
-        path: "{{ item.path }}"
-        regexp: '^deb.*bullseye-backports'
-        replace: '# \g<0>'
-      loop: "{{ backports_files.files }}"
-      when: backports_files.matched > 0
-  rescue:
-    - name: Continue even if repository disabling fails
-      debug:
-        msg: "Could not disable backports repositories, continuing anyway"
 
 - name: Update package repositories
   apt:
@@ -57,22 +31,17 @@
     update_cache: yes
     cache_valid_time: 3600
 
-- name: Install required packages
+- name: Install Zabbix packages
   apt:
     name:
       - zabbix-server-mysql
       - zabbix-frontend-php
       - zabbix-apache-conf
       - zabbix-agent
+      - zabbix-sql-scripts
       - mariadb-server
       - python3-pymysql
-    state: present
-
-- name: Install locales package
-  apt:
-    name: 
-      - locales
-      - locales-all
+      - php-mysql
     state: present
 
 - name: Generate en_US.UTF-8 locale
@@ -96,7 +65,7 @@
       export LC_ALL=en_US.UTF-8
     state: present
 
-- name: Create Zabbix user and group
+- name: Create Zabbix user
   user:
     name: zabbix
     system: yes
@@ -107,16 +76,15 @@
 
 - name: Create Zabbix directories
   file:
-    path: "{{ item.path }}"
+    path: "{{ item }}"
     state: directory
-    owner: "{{ item.owner | default('zabbix') }}"
-    group: "{{ item.group | default('zabbix') }}"
-    mode: "{{ item.mode | default('0755') }}"
+    owner: zabbix
+    group: zabbix
+    mode: '0755'
   loop:
-    - { path: /run/zabbix }
-    - { path: /var/log/zabbix }
-    - { path: /var/lib/zabbix }
-    - { path: /etc/zabbix, owner: root, group: root }
+    - /run/zabbix
+    - /var/log/zabbix
+    - /var/lib/zabbix
 
 - name: Ensure MariaDB is started and enabled
   systemd:
@@ -130,14 +98,7 @@
     state: present
     timeout: 30
 
-- name: Check if MySQL root password is already set
-  shell: |
-    mysql -u root -e "SELECT 1;" 2>/dev/null && echo "no_password" || echo "has_password"
-  register: mysql_password_check
-  changed_when: false
-  ignore_errors: true
-
-- name: Set MySQL root password if no password set
+- name: Set MySQL root password
   mysql_user:
     name: root
     host: localhost
@@ -146,19 +107,6 @@
     check_implicit_admin: yes
     priv: "*.*:ALL,GRANT"
     state: present
-  when: "'no_password' in mysql_password_check.stdout"
-
-- name: Set MySQL root password if password already set
-  mysql_user:
-    name: root
-    host: localhost
-    password: "{{ mysql_root_password }}"
-    login_user: root
-    login_password: "{{ mysql_root_password }}"
-    login_unix_socket: /var/run/mysqld/mysqld.sock
-    priv: "*.*:ALL,GRANT"
-    state: present
-  when: "'has_password' in mysql_password_check.stdout"
 
 - name: Remove anonymous MySQL users
   mysql_user:
@@ -229,25 +177,41 @@
     - { option: PidFile, value: /run/zabbix/zabbix_agentd.pid }
   notify: Restart Zabbix agent
 
-- name: Configure PHP timezone for Apache
+- name: Configure PHP timezone for Apache (frontend)
   lineinfile:
     path: /etc/php/7.4/apache2/php.ini
-    regexp: "^;?date.timezone.*"
+    regexp: "^;?date.timezone"
     line: "date.timezone = {{ php_timezone | default('Europe/Moscow') }}"
     state: present
   notify: Reload Apache
 
-- name: Enable Apache site for Zabbix
+- name: Configure PHP timezone for CLI (backend - zabbix_server)
+  lineinfile:
+    path: /etc/php/7.4/cli/php.ini
+    regexp: "^;?date.timezone"
+    line: "date.timezone = {{ php_timezone | default('Europe/Moscow') }}"
+    state: present
+
+- name: Create Zabbix web config directory
   file:
-    src: /etc/zabbix/apache.conf
-    dest: /etc/apache2/sites-available/zabbix.conf
-    state: link
-  notify: Restart Apache
+    path: /usr/share/zabbix/conf
+    state: directory
+    owner: www-data
+    group: www-data
+    mode: '0755'
+
+- name: Create empty config file for web installer
+  file:
+    path: /usr/share/zabbix/conf/zabbix.conf.php
+    state: touch
+    owner: www-data
+    group: www-data
+    mode: '0644'
 
 - name: Enable Apache modules
-  apache2_module:
-    name: "{{ item }}"
-    state: present
+  command:
+    cmd: a2enmod {{ item }}
+    creates: /etc/apache2/mods-enabled/{{ item }}.load
   loop:
     - rewrite
   notify: Restart Apache
@@ -264,23 +228,33 @@
     removes: /etc/apache2/sites-enabled/000-default.conf
   notify: Restart Apache
 
-- name: Fix Zabbix systemd services
-  blockinfile:
-    path: "/lib/systemd/system/{{ item }}.service"
-    marker: "# {mark} ANSIBLE MANAGED BLOCK - SERVICE FIX"
-    block: |
+- name: Fix Zabbix systemd service
+  copy:
+    content: |
+      [Unit]
+      Description=Zabbix Server
+      After=syslog.target
+      After=network.target
+      After=mysql.service
+      After=mysqld.service
+      After=mariadb.service
+
       [Service]
       Type=simple
       User=zabbix
       Group=zabbix
-      PIDFile=/run/zabbix/{{ item }}.pid
+      PIDFile=/run/zabbix/zabbix_server.pid
       RuntimeDirectory=zabbix
       RuntimeDirectoryMode=0755
-    state: present
-    insertafter: "[Unit]"
-  loop:
-    - zabbix-server
-    - zabbix-agent
+      ExecStart=/usr/sbin/zabbix_server -c /etc/zabbix/zabbix_server.conf
+      ExecReload=/bin/kill -HUP $MAINPID
+      Restart=on-failure
+      RestartSec=5s
+
+      [Install]
+      WantedBy=multi-user.target
+    dest: /lib/systemd/system/zabbix-server.service
+    mode: '0644'
   notify: Reload systemd
 
 - name: Remove any existing corrupted PID files
