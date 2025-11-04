@@ -69,6 +69,66 @@
     state: present
     force_apt_get: yes
 
+- name: Install locales package
+  apt:
+    name: 
+      - locales
+      - locales-all
+    state: present
+
+- name: Generate en_US.UTF-8 locale
+  locale_gen:
+    name: en_US.UTF-8
+    state: present
+
+- name: Set system locale
+  copy:
+    content: |
+      LANG=en_US.UTF-8
+      LC_ALL=en_US.UTF-8
+    dest: /etc/default/locale
+
+- name: Configure Apache locale environment
+  blockinfile:
+    path: /etc/apache2/envvars
+    marker: "# {mark} ANSIBLE MANAGED BLOCK - LOCALE"
+    block: |
+      export LANG=en_US.UTF-8
+      export LC_ALL=en_US.UTF-8
+    state: present
+
+- name: Create Zabbix user and group
+  user:
+    name: zabbix
+    system: yes
+    shell: /bin/false
+    home: /var/lib/zabbix
+    create_home: yes
+    state: present
+
+- name: Create necessary directories for Zabbix
+  file:
+    path: "{{ item }}"
+    state: directory
+    owner: zabbix
+    group: zabbix
+    mode: '0755'
+  loop:
+    - /run/zabbix
+    - /var/log/zabbix
+    - /var/lib/zabbix
+
+- name: Set ownership for Zabbix directories
+  file:
+    path: "{{ item }}"
+    owner: zabbix
+    group: zabbix
+    recurse: yes
+  loop:
+    - /etc/zabbix
+    - /var/log/zabbix
+    - /var/lib/zabbix
+
 - name: Ensure MariaDB is started and enabled
   systemd:
     name: mariadb
@@ -206,6 +266,22 @@
     - { option: DBPassword, value: "{{ zabbix_db_password }}" }
   notify: Restart Zabbix server
 
+- name: Configure Zabbix server to run as zabbix user
+  lineinfile:
+    path: /etc/zabbix/zabbix_server.conf
+    regexp: "^#?User=.*"
+    line: "User=zabbix"
+    state: present
+  notify: Restart Zabbix server
+
+- name: Set proper permissions for Zabbix configuration files
+  file:
+    path: /etc/zabbix
+    owner: zabbix
+    group: zabbix
+    mode: '0755'
+    recurse: yes
+
 - name: Configure PHP timezone for Apache
   lineinfile:
     path: /etc/php/7.4/apache2/php.ini
@@ -219,6 +295,14 @@
     path: /etc/zabbix/zabbix_agentd.conf
     regexp: "^Server=.*"
     line: "Server=127.0.0.1"
+    state: present
+  notify: Restart Zabbix agent
+
+- name: Configure Zabbix agent to run as zabbix user
+  lineinfile:
+    path: /etc/zabbix/zabbix_agentd.conf
+    regexp: "^#?User=.*"
+    line: "User=zabbix"
     state: present
   notify: Restart Zabbix agent
 
@@ -246,6 +330,18 @@
     cmd: a2dissite 000-default.conf
     removes: /etc/apache2/sites-enabled/000-default.conf
   notify: Restart Apache
+
+- name: Create systemd runtime directory for Zabbix
+  file:
+    path: /run/zabbix
+    state: directory
+    owner: zabbix
+    group: zabbix
+    mode: '0755'
+
+- name: Reload systemd to apply changes
+  systemd:
+    daemon_reload: yes
 
 - name: Ensure services are enabled and started
   systemd:
