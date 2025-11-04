@@ -217,6 +217,13 @@
     state: present
   notify: Reload Apache
 
+- name: Enable Apache site for Zabbix
+  file:
+    src: /etc/zabbix/apache.conf
+    dest: /etc/apache2/sites-available/zabbix.conf
+    state: link
+  notify: Restart Apache
+
 - name: Enable Apache modules
   apache2_module:
     name: "{{ item }}"
@@ -226,15 +233,15 @@
   notify: Restart Apache
 
 - name: Enable Zabbix Apache site
-  apache2_site:
-    name: zabbix.conf
-    state: present
+  command:
+    cmd: a2ensite zabbix.conf
+    creates: /etc/apache2/sites-enabled/zabbix.conf
   notify: Restart Apache
 
 - name: Disable default Apache site
-  apache2_site:
-    name: 000-default.conf
-    state: absent
+  command:
+    cmd: a2dissite 000-default.conf
+    removes: /etc/apache2/sites-enabled/000-default.conf
   notify: Restart Apache
 
 - name: Fix Zabbix systemd services
