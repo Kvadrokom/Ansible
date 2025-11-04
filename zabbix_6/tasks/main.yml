@@ -1,19 +1,15 @@
 ---
-- name: Install dependencies
-  apt:
-    name:
-      - gnupg
-      - ca-certificates
-      - apt-transport-https
-      - locales
-      - locales-all
-    state: present
-
 - name: Update package repositories
   apt:
     update_cache: yes
     cache_valid_time: 3600
   ignore_errors: yes
+
+- name: Install minimal dependencies
+  apt:
+    name:
+      - ca-certificates
+    state: present
 
 - name: Add Zabbix repository key
   apt_key:
@@ -40,29 +36,11 @@
       - zabbix-agent
       - zabbix-sql-scripts
       - mariadb-server
-      - python3-pymysql
-      - php-mysql
     state: present
 
 - name: Generate en_US.UTF-8 locale
   locale_gen:
     name: en_US.UTF-8
-    state: present
-
-- name: Set system locale
-  copy:
-    content: |
-      LANG=en_US.UTF-8
-      LC_ALL=en_US.UTF-8
-    dest: /etc/default/locale
-
-- name: Configure Apache locale environment
-  blockinfile:
-    path: /etc/apache2/envvars
-    marker: "# {mark} ANSIBLE MANAGED BLOCK - LOCALE"
-    block: |
-      export LANG=en_US.UTF-8
-      export LC_ALL=en_US.UTF-8
     state: present
 
 - name: Create Zabbix user
@@ -107,21 +85,6 @@
     check_implicit_admin: yes
     priv: "*.*:ALL,GRANT"
     state: present
-
-- name: Remove anonymous MySQL users
-  mysql_user:
-    name: ''
-    host_all: yes
-    state: absent
-    login_user: root
-    login_password: "{{ mysql_root_password }}"
-
-- name: Remove test database
-  mysql_db:
-    name: test
-    state: absent
-    login_user: root
-    login_password: "{{ mysql_root_password }}"
 
 - name: Create Zabbix database
   mysql_db:
@@ -177,20 +140,13 @@
     - { option: PidFile, value: /run/zabbix/zabbix_agentd.pid }
   notify: Restart Zabbix agent
 
-- name: Configure PHP timezone for Apache (frontend)
+- name: Configure PHP timezone for Apache
   lineinfile:
     path: /etc/php/7.4/apache2/php.ini
     regexp: "^;?date.timezone"
     line: "date.timezone = {{ php_timezone | default('Europe/Moscow') }}"
     state: present
   notify: Reload Apache
-
-- name: Configure PHP timezone for CLI (backend - zabbix_server)
-  lineinfile:
-    path: /etc/php/7.4/cli/php.ini
-    regexp: "^;?date.timezone"
-    line: "date.timezone = {{ php_timezone | default('Europe/Moscow') }}"
-    state: present
 
 - name: Create Zabbix web config directory
   file:
@@ -222,13 +178,7 @@
     creates: /etc/apache2/sites-enabled/zabbix.conf
   notify: Restart Apache
 
-- name: Disable default Apache site
-  command:
-    cmd: a2dissite 000-default.conf
-    removes: /etc/apache2/sites-enabled/000-default.conf
-  notify: Restart Apache
-
-- name: Fix Zabbix systemd service
+- name: Configure Zabbix systemd service
   copy:
     content: |
       [Unit]
@@ -256,15 +206,6 @@
     dest: /lib/systemd/system/zabbix-server.service
     mode: '0644'
   notify: Reload systemd
-
-- name: Remove any existing corrupted PID files
-  file:
-    path: "{{ item }}"
-    state: absent
-  loop:
-    - /run/zabbix/zabbix_server.pid
-    - /run/zabbix/zabbix_agentd.pid
-  ignore_errors: true
 
 - name: Ensure services are enabled and started
   systemd:
