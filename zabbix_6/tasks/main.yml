@@ -130,7 +130,14 @@
     state: present
     timeout: 30
 
-- name: Set MySQL root password
+- name: Check if MySQL root password is already set
+  shell: |
+    mysql -u root -e "SELECT 1;" 2>/dev/null && echo "no_password" || echo "has_password"
+  register: mysql_password_check
+  changed_when: false
+  ignore_errors: true
+
+- name: Set MySQL root password if no password set
   mysql_user:
     name: root
     host: localhost
@@ -139,6 +146,19 @@
     check_implicit_admin: yes
     priv: "*.*:ALL,GRANT"
     state: present
+  when: "'no_password' in mysql_password_check.stdout"
+
+- name: Set MySQL root password if password already set
+  mysql_user:
+    name: root
+    host: localhost
+    password: "{{ mysql_root_password }}"
+    login_user: root
+    login_password: "{{ mysql_root_password }}"
+    login_unix_socket: /var/run/mysqld/mysqld.sock
+    priv: "*.*:ALL,GRANT"
+    state: present
+  when: "'has_password' in mysql_password_check.stdout"
 
 - name: Remove anonymous MySQL users
   mysql_user:
