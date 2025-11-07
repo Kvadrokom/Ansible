@@ -11,9 +11,15 @@
       - ca-certificates
     state: present
 
-- name: Add Zabbix repository key
-  apt_key:
+- name: Download Zabbix repository key manually
+  get_url:
     url: "https://repo.zabbix.com/zabbix-official-repo.key"
+    dest: /tmp/zabbix.key
+    mode: '0644'
+
+- name: Add Zabbix repository key from file
+  apt_key:
+    file: /tmp/zabbix.key
     state: present
 
 - name: Add Zabbix repository for Debian 11
@@ -26,6 +32,7 @@
   apt:
     update_cache: yes
     cache_valid_time: 3600
+  ignore_errors: true  # Игнорируем ошибки bullseye-backports
 
 - name: Install Zabbix packages
   apt:
