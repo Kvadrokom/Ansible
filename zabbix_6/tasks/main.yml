@@ -3,7 +3,7 @@
   apt:
     update_cache: yes
     cache_valid_time: 3600
-  ignore_errors: yes
+  ignore_errors: true
 
 - name: Install minimal dependencies
   apt:
@@ -11,20 +11,9 @@
       - ca-certificates
     state: present
 
-- name: Download Zabbix repository key manually
-  get_url:
-    url: "https://repo.zabbix.com/zabbix-official-repo.key"
-    dest: /tmp/zabbix.key
-    mode: '0644'
-
-- name: Add Zabbix repository key from file
-  apt_key:
-    file: /tmp/zabbix.key
-    state: present
-
-- name: Add Zabbix repository for Debian 11
+- name: Add Zabbix repository without signature check
   apt_repository:
-    repo: "deb https://repo.zabbix.com/zabbix/{{ zabbix_version | default('6.0') }}/debian bullseye main"
+    repo: "deb [trusted=yes] https://repo.zabbix.com/zabbix/{{ zabbix_version | default('6.0') }}/debian bullseye main"
     state: present
     filename: zabbix
 
