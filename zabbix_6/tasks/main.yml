@@ -1,36 +1,48 @@
 ---
 - name: Temporarily disable problematic repositories
   block:
+    - name: Check if bullseye-backports needs commenting in sources.list
+      shell: |
+        grep -q '^[^#].*bullseye-backports' /etc/apt/sources.list && echo "needs_comment" || echo "already_commented"
+      register: backports_check
+      changed_when: false
+
     - name: Comment out bullseye-backports in sources.list
       replace:
         path: /etc/apt/sources.list
-        regexp: '^deb.*bullseye-backports'
+        regexp: '^[^#]deb.*bullseye-backports'
         replace: '# \g<0>'
-      register: backports_disabled
+      when: "'needs_comment' in backports_check.stdout"
+      register: sources_comment
 
-    - name: Comment out bullseye-backports in sources.list.d files
+    - name: Find files containing bullseye-backports
       find:
         paths: /etc/apt/sources.list.d
         patterns: "*.list"
         contains: "bullseye-backports"
       register: backports_files
 
-    - name: Disable backports in found files
+    - name: Comment out bullseye-backports in found files
       replace:
         path: "{{ item.path }}"
-        regexp: '^deb.*bullseye-backports'
+        regexp: '^[^#]deb.*bullseye-backports'
         replace: '# \g<0>'
       loop: "{{ backports_files.files }}"
       when: backports_files.matched > 0
+      register: files_comment
   rescue:
     - name: Continue even if repository disabling fails
       debug:
         msg: "Could not disable backports repositories, continuing anyway"
 
-- name: Update package repositories
+- name: Update package repositories only if repositories were changed
   apt:
     update_cache: yes
     cache_valid_time: 3600
+  when: 
+    - sources_comment is changed or 
+    - files_comment is changed or 
+    - files_comment.results | selectattr('changed') | list | length > 0
   ignore_errors: true
 
 - name: Install minimal dependencies
@@ -40,30 +52,45 @@
       - python3-psycopg2
     state: present
 
+- name: Check if Zabbix repository is already configured
+  shell: |
+    grep -r "repo.zabbix.com" /etc/apt/sources.list* | grep -q "{{ zabbix_version | default('6.0') }}" && echo "exists" || echo "missing"
+  register: zabbix_repo_check
+  changed_when: false
+
 - name: Add Zabbix repository without signature check
   apt_repository:
     repo: "deb [trusted=yes] https://repo.zabbix.com/zabbix/{{ zabbix_version | default('6.0') }}/debian bullseye main"
     state: present
     filename: zabbix
     update_cache: no
+  when: "'missing' in zabbix_repo_check.stdout"
+  register: zabbix_repo_added
 
-- name: Update cache with Zabbix repository
+- name: Update cache with Zabbix repository only if repo was added
   apt:
     update_cache: yes
     cache_valid_time: 3600
+  when: zabbix_repo_added is changed
   ignore_errors: true
 
-- name: Install Zabbix packages with PostgreSQL
+- name: Check installed Zabbix packages
+  package_facts:
+    manager: auto
+
+- name: Install Zabbix packages with PostgreSQL only if missing
   apt:
-    name:
-      - zabbix-server-pgsql
-      - zabbix-frontend-php
-      - zabbix-apache-conf
-      - zabbix-agent
-      - zabbix-sql-scripts
-      - postgresql
-      - postgresql-contrib
+    name: "{{ item }}"
     state: present
+  loop:
+    - zabbix-server-pgsql
+    - zabbix-frontend-php
+    - zabbix-apache-conf
+    - zabbix-agent
+    - zabbix-sql-scripts
+    - postgresql
+    - postgresql-contrib
+  when: item not in ansible_facts.packages
 
 - name: Generate en_US.UTF-8 locale
   locale_gen:
@@ -104,7 +131,7 @@
     timeout: 30
 
 - name: Create Zabbix database user
-  become: true
+  become: yes
   become_user: postgres
   postgresql_user:
     name: "{{ zabbix_db_user | default('zabbix') }}"
@@ -113,7 +140,7 @@
     state: present
 
 - name: Check if Zabbix database exists
-  become: true
+  become: yes
   become_user: postgres
   postgresql_db:
     name: "{{ zabbix_db_name | default('zabbix') }}"
@@ -121,7 +148,7 @@
   register: zabbix_db_exists
 
 - name: Create Zabbix database
-  become: true
+  become: yes
   become_user: postgres
   postgresql_db:
     name: "{{ zabbix_db_name | default('zabbix') }}"
@@ -134,7 +161,7 @@
   when: not zabbix_db_exists.changed
 
 - name: Check if schema is already loaded
-  become: true
+  become: yes
   become_user: postgres
   shell: |
     psql -d "{{ zabbix_db_name | default('zabbix') }}" -c "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public'" | grep -q -E '[1-9][0-9]*'
@@ -143,13 +170,18 @@
   ignore_errors: true
 
 - name: Load Zabbix database schema
-  become: true
+  become: yes
   become_user: postgres
   shell: |
     zcat /usr/share/zabbix-sql-scripts/postgresql/server.sql.gz | psql -d "{{ zabbix_db_name | default('zabbix') }}" -U "{{ zabbix_db_user | default('zabbix') }}"
   environment:
     PGPASSWORD: "{{ zabbix_db_password }}"
   when: schema_check.rc != 0
+
+- name: Check if Zabbix server config exists
+  stat:
+    path: /etc/zabbix/zabbix_server.conf
+  register: server_conf_stat
 
 - name: Configure Zabbix server settings
   lineinfile:
@@ -165,7 +197,38 @@
     - { option: DBPort, value: "5432" }
     - { option: User, value: zabbix }
     - { option: PidFile, value: /run/zabbix/zabbix_server.pid }
+  when: server_conf_stat.stat.exists
   notify: Restart Zabbix server
+
+- name: Check if Zabbix agent config exists
+  stat:
+    path: /etc/zabbix/zabbix_agentd.conf
+  register: agent_conf_stat
+
+- name: Create basic Zabbix agent config if missing
+  copy:
+    content: |
+      # Zabbix Agent Basic Configuration
+      PidFile=/run/zabbix/zabbix_agentd.pid
+      LogFile=/var/log/zabbix/zabbix_agentd.log
+      LogFileSize=0
+      DebugLevel=3
+      Server=127.0.0.1
+      ServerActive=127.0.0.1
+      Hostname=zabbix-server
+      HostnameItem=system.hostname
+      HostMetadata=Linux
+      HostMetadataItem=system.uname
+      RefreshActiveChecks=120
+      StartAgents=3
+      Timeout=3
+      Include=/etc/zabbix/zabbix_agentd.d/*.conf
+      UnsafeUserParameters=1
+    dest: /etc/zabbix/zabbix_agentd.conf
+    owner: zabbix
+    group: zabbix
+    mode: '0640'
+  when: not agent_conf_stat.stat.exists
 
 - name: Configure Zabbix agent settings
   lineinfile:
@@ -177,6 +240,7 @@
     - { option: Server, value: 127.0.0.1 }
     - { option: User, value: zabbix }
     - { option: PidFile, value: /run/zabbix/zabbix_agentd.pid }
+  when: agent_conf_stat.stat.exists
   notify: Restart Zabbix agent
 
 - name: Configure PHP timezone for Apache
@@ -187,6 +251,11 @@
     state: present
   notify: Reload Apache
 
+- name: Check if Zabbix web config directory exists
+  stat:
+    path: /usr/share/zabbix/conf
+  register: web_dir_stat
+
 - name: Create Zabbix web config directory
   file:
     path: /usr/share/zabbix/conf
@@ -194,6 +263,7 @@
     owner: www-data
     group: www-data
     mode: '0755'
+  when: not web_dir_stat.stat.exists
 
 - name: Check if web config file exists
   stat:
@@ -241,7 +311,14 @@
     path: /lib/systemd/system/zabbix-server.service
   register: systemd_service_stat
 
-- name: Configure Zabbix systemd service
+- name: Check current systemd service content
+  shell: |
+    cat /lib/systemd/system/zabbix-server.service 2>/dev/null | md5sum | cut -d' ' -f1
+  register: current_systemd_hash
+  when: systemd_service_stat.stat.exists
+  changed_when: false
+
+- name: Configure Zabbix systemd service only if different
   copy:
     content: |
       [Unit]
@@ -266,16 +343,26 @@
       WantedBy=multi-user.target
     dest: /lib/systemd/system/zabbix-server.service
     mode: '0644'
-  when: systemd_service_stat.stat.exists
+  register: systemd_changed
+  when: 
+    - systemd_service_stat.stat.exists
+    - current_systemd_hash.stdout != "d41d8cd98f00b204e9800998ecf8427e"  # empty hash means file doesn't exist
   notify: Reload systemd
 
-- name: Remove any existing corrupted PID files
-  file:
+- name: Check if PID files exist
+  stat:
     path: "{{ item }}"
-    state: absent
   loop:
     - /run/zabbix/zabbix_server.pid
     - /run/zabbix/zabbix_agentd.pid
+  register: pid_files
+
+- name: Remove any existing corrupted PID files
+  file:
+    path: "{{ item.item }}"
+    state: absent
+  loop: "{{ pid_files.results }}"
+  when: item.stat.exists
   ignore_errors: true
 
 - name: Ensure services are enabled and started
