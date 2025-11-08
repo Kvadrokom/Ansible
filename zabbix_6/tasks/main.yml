@@ -260,13 +260,58 @@
     mode: '0640'
   when: agent_conf_stat.stat.exists
 
-- name: Configure PHP timezone for Apache
+# НАСТРОЙКИ PHP ДЛЯ ZABBIX
+- name: Configure PHP settings for Zabbix requirements
   lineinfile:
     path: /etc/php/7.4/apache2/php.ini
-    regexp: "^;?date.timezone"
-    line: "date.timezone = {{ php_timezone | default('Europe/Moscow') }}"
+    regexp: "^{{ item.option }} =.*"
+    line: "{{ item.option }} = {{ item.value }}"
     state: present
-  notify: Reload Apache
+    backup: yes
+  loop:
+    - { option: post_max_size, value: "16M" }
+    - { option: max_execution_time, value: "300" }
+    - { option: max_input_time, value: "300" }
+    - { option: memory_limit, value: "128M" }
+    - { option: upload_max_filesize, value: "2M" }
+    - { option: max_input_vars, value: "10000" }
+    - { option: date.timezone, value: "{{ php_timezone | default('Europe/Moscow') }}" }
+  notify: Restart Apache
+
+- name: Verify PHP configuration changes
+  shell: |
+    grep -E "^(post_max_size|max_execution_time|max_input_time) = " /etc/php/7.4/apache2/php.ini
+  register: php_config_check
+  changed_when: false
+
+- name: Show PHP configuration status
+  debug:
+    msg: "Current PHP settings: {{ php_config_check.stdout_lines }}"
+
+- name: Check required PHP extensions
+  shell: |
+    php -m | grep -E "^(bcmath|ctype|json|mbstring|session|xml|socket|gd|libxml|openssl|pdo|pdo_pgsql|pgsql|simplexml|ldap|curl|zip)$" || echo "missing"
+  register: php_extensions_check
+  changed_when: false
+
+- name: Show PHP extensions status
+  debug:
+    msg: "PHP extensions check: {{ php_extensions_check.stdout_lines }}"
+
+- name: Install additional PHP extensions if missing
+  apt:
+    name: "{{ item }}"
+    state: present
+  loop:
+    - php7.4-bcmath
+    - php7.4-mbstring
+    - php7.4-xml
+    - php7.4-gd
+    - php7.4-ldap
+    - php7.4-curl
+    - php7.4-zip
+  when: item not in ansible_facts.packages
+  notify: Restart Apache
 
 - name: Check if Zabbix web config directory exists
   stat:
@@ -489,6 +534,26 @@
   when: zabbix_site_available_stat.stat.exists
   notify: Restart Apache
 
+- name: Create redirect index.html for root URL access
+  copy:
+    dest: /usr/share/zabbix/index.html
+    content: |
+      <!DOCTYPE html>
+      <html>
+      <head>
+          <meta http-equiv="refresh" content="0; url=index.php">
+          <title>Redirecting to Zabbix</title>
+      </head>
+      <body>
+          <p>Redirecting to <a href="index.php">Zabbix</a>...</p>
+          <script>window.location.href = 'index.php';</script>
+      </body>
+      </html>
+    owner: www-data
+    group: www-data
+    mode: '0644'
+  notify: Restart Apache
+
 - name: Ensure Zabbix site is enabled
   command:
     cmd: a2ensite zabbix.conf
@@ -517,19 +582,13 @@
       - php7.4-curl
     state: present
   when: 
-    - "'php7.4-pgsql' not in ansible_facts.packages"
-    - or
-    - "'php7.4-bcmath' not in ansible_facts.packages"
-    - or
-    - "'php7.4-mbstring' not in ansible_facts.packages"
-    - or
-    - "'php7.4-gd' not in ansible_facts.packages"
-    - or
-    - "'php7.4-xml' not in ansible_facts.packages"
-    - or
-    - "'php7.4-ldap' not in ansible_facts.packages"
-    - or
-    - "'php7.4-curl' not in ansible_facts.packages"
+    - "'php7.4-pgsql' not in ansible_facts.packages or
+       'php7.4-bcmath' not in ansible_facts.packages or
+       'php7.4-mbstring' not in ansible_facts.packages or
+       'php7.4-gd' not in ansible_facts.packages or
+       'php7.4-xml' not in ansible_facts.packages or
+       'php7.4-ldap' not in ansible_facts.packages or
+       'php7.4-curl' not in ansible_facts.packages"
   notify: Restart Apache
 
 - name: Set proper permissions for Zabbix web directory
@@ -560,6 +619,18 @@
 - name: Show Apache HTTP check result
   debug:
     msg: "Apache HTTP check status: {{ apache_http_check.status }}"
+
+- name: Verify Zabbix web interface accessibility
+  uri:
+    url: "http://localhost/setup.php"
+    method: GET
+    status_code: 200
+  register: zabbix_web_check
+  changed_when: false
+
+- name: Show Zabbix web interface status
+  debug:
+    msg: "Zabbix web interface status: {{ zabbix_web_check.status }}"
 
 - name: Ensure services are enabled and started
   systemd:
