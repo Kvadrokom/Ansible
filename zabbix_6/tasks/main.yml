@@ -40,9 +40,9 @@
     update_cache: yes
     cache_valid_time: 3600
   when: 
-    - sources_comment is changed or 
-    - files_comment is changed or 
-    - files_comment.results | selectattr('changed') | list | length > 0
+    - (sources_comment is defined and sources_comment is changed) or 
+    - (files_comment is defined and files_comment is changed) or 
+    - (files_comment is defined and files_comment.results | selectattr('changed') | list | length > 0)
   ignore_errors: true
 
 - name: Install minimal dependencies
@@ -71,7 +71,7 @@
   apt:
     update_cache: yes
     cache_valid_time: 3600
-  when: zabbix_repo_added is changed
+  when: zabbix_repo_added is defined and zabbix_repo_added is changed
   ignore_errors: true
 
 - name: Check installed Zabbix packages
@@ -117,6 +117,7 @@
     - /run/zabbix
     - /var/log/zabbix
     - /var/lib/zabbix
+    - /etc/zabbix/zabbix_agentd.d  # Добавляем отсутствующую директорию
 
 - name: Ensure PostgreSQL is started and enabled
   systemd:
@@ -187,6 +188,7 @@
     regexp: "^{{ item.option }}=.*"
     line: "{{ item.option }}={{ item.value }}"
     state: present
+    backup: yes
   loop:
     - { option: DBHost, value: localhost }
     - { option: DBName, value: "{{ zabbix_db_name | default('zabbix') }}" }
@@ -197,6 +199,14 @@
     - { option: PidFile, value: /run/zabbix/zabbix_server.pid }
   when: server_conf_stat.stat.exists
   notify: Restart Zabbix server
+
+- name: Fix Zabbix server config permissions
+  file:
+    path: /etc/zabbix/zabbix_server.conf
+    owner: zabbix
+    group: zabbix
+    mode: '0640'
+  when: server_conf_stat.stat.exists
 
 - name: Check if Zabbix agent config exists
   stat:
@@ -234,12 +244,21 @@
     regexp: "^{{ item.option }}=.*"
     line: "{{ item.option }}={{ item.value }}"
     state: present
+    backup: yes
   loop:
     - { option: Server, value: 127.0.0.1 }
     - { option: User, value: zabbix }
     - { option: PidFile, value: /run/zabbix/zabbix_agentd.pid }
   when: agent_conf_stat.stat.exists
   notify: Restart Zabbix agent
+
+- name: Fix Zabbix agent config permissions
+  file:
+    path: /etc/zabbix/zabbix_agentd.conf
+    owner: zabbix
+    group: zabbix
+    mode: '0640'
+  when: agent_conf_stat.stat.exists
 
 - name: Configure PHP timezone for Apache
   lineinfile:
@@ -321,7 +340,7 @@
     cmd: a2ensite zabbix.conf
     creates: /etc/apache2/sites-enabled/zabbix.conf
   when: 
-    - zabbix_site_available_stat.stat.exists or zabbix_apache_conf_stat.stat.exists
+    - (zabbix_site_available_stat.stat.exists or zabbix_apache_conf_stat.stat.exists)
     - not zabbix_site_enabled_stat.stat.exists
   notify: Restart Apache
 
@@ -332,9 +351,8 @@
 
 - name: Check current systemd service content
   shell: |
-    cat /lib/systemd/system/zabbix-server.service 2>/dev/null | md5sum | cut -d' ' -f1
+    cat /lib/systemd/system/zabbix-server.service 2>/dev/null | md5sum | cut -d' ' -f1 || echo "missing"
   register: current_systemd_hash
-  when: systemd_service_stat.stat.exists
   changed_when: false
 
 - name: Configure Zabbix systemd service only if different
@@ -365,7 +383,7 @@
   register: systemd_changed
   when: 
     - systemd_service_stat.stat.exists
-    - current_systemd_hash.stdout != "d41d8cd98f00b204e9800998ecf8427e"  # empty hash means file doesn't exist
+    - current_systemd_hash.stdout != "d41d8cd98f00b204e9800998ecf8427e"  # empty file hash
   notify: Reload systemd
 
 - name: Check if PID files exist
