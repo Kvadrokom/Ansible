@@ -117,7 +117,7 @@
     - /run/zabbix
     - /var/log/zabbix
     - /var/lib/zabbix
-    - /etc/zabbix/zabbix_agentd.d  # Добавляем отсутствующую директорию
+    - /etc/zabbix/zabbix_agentd.d
 
 - name: Ensure PostgreSQL is started and enabled
   systemd:
@@ -367,7 +367,7 @@
       [Service]
       Type=simple
       User=zabbix
-      Group=zabbix
+      Group: zabbix
       PIDFile=/run/zabbix/zabbix_server.pid
       RuntimeDirectory=zabbix
       RuntimeDirectoryMode=0755
@@ -383,7 +383,7 @@
   register: systemd_changed
   when: 
     - systemd_service_stat.stat.exists
-    - current_systemd_hash.stdout != "d41d8cd98f00b204e9800998ecf8427e"  # empty file hash
+    - current_systemd_hash.stdout != "d41d8cd98f00b204e9800998ecf8427e"
   notify: Reload systemd
 
 - name: Check if PID files exist
@@ -402,7 +402,7 @@
   when: item.stat.exists
   ignore_errors: true
 
-# НОВЫЕ ЗАДАЧИ ДЛЯ APACHE КОНФИГУРАЦИИ
+# ИСПРАВЛЕНИЯ ДЛЯ APACHE И DIRECTORYINDEX
 - name: Check Apache default site status
   stat:
     path: /etc/apache2/sites-enabled/000-default.conf
@@ -414,6 +414,36 @@
   when: default_site_enabled.stat.exists
   notify: Restart Apache
 
+- name: Check if mod_dir is enabled
+  stat:
+    path: /etc/apache2/mods-enabled/dir.load
+  register: mod_dir_enabled
+
+- name: Enable mod_dir if not enabled
+  command:
+    cmd: a2enmod dir
+    creates: /etc/apache2/mods-enabled/dir.load
+  when: not mod_dir_enabled.stat.exists
+  notify: Restart Apache
+
+- name: Check current DirectoryIndex configuration
+  stat:
+    path: /etc/apache2/mods-enabled/dir.conf
+  register: dir_conf_stat
+
+- name: Configure DirectoryIndex for Apache
+  copy:
+    dest: /etc/apache2/mods-enabled/dir.conf
+    content: |
+      <IfModule mod_dir.c>
+          DirectoryIndex index.php index.html index.cgi index.pl index.xhtml index.htm
+      </IfModule>
+    owner: root
+    group: root
+    mode: '0644'
+  when: dir_conf_stat.stat.exists
+  notify: Restart Apache
+
 - name: Create Zabbix Apache configuration if missing
   copy:
     dest: /etc/apache2/sites-available/zabbix.conf
@@ -421,6 +451,10 @@
       <VirtualHost *:80>
           ServerName {{ ansible_host }}
           DocumentRoot /usr/share/zabbix
+
+          <IfModule mod_dir.c>
+              DirectoryIndex index.php index.html
+          </IfModule>
 
           <Directory "/usr/share/zabbix">
               Options FollowSymLinks
@@ -443,6 +477,18 @@
   when: not zabbix_site_available_stat.stat.exists and not zabbix_apache_conf_stat.stat.exists
   notify: Restart Apache
 
+- name: Update existing Zabbix Apache configuration with DirectoryIndex
+  blockinfile:
+    path: /etc/apache2/sites-available/zabbix.conf
+    block: |
+      <IfModule mod_dir.c>
+          DirectoryIndex index.php index.html
+      </IfModule>
+    marker: "# {mark} ANSIBLE MANAGED BLOCK - DIRECTORYINDEX"
+    insertafter: '<VirtualHost \\*:80>'
+  when: zabbix_site_available_stat.stat.exists
+  notify: Restart Apache
+
 - name: Ensure Zabbix site is enabled
   command:
     cmd: a2ensite zabbix.conf
@@ -462,7 +508,6 @@
 - name: Install required PHP modules for Zabbix
   apt:
     name:
-      - php7.4
       - php7.4-pgsql
       - php7.4-bcmath
       - php7.4-mbstring
@@ -471,6 +516,20 @@
       - php7.4-ldap
       - php7.4-curl
     state: present
+  when: 
+    - "'php7.4-pgsql' not in ansible_facts.packages"
+    - or
+    - "'php7.4-bcmath' not in ansible_facts.packages"
+    - or
+    - "'php7.4-mbstring' not in ansible_facts.packages"
+    - or
+    - "'php7.4-gd' not in ansible_facts.packages"
+    - or
+    - "'php7.4-xml' not in ansible_facts.packages"
+    - or
+    - "'php7.4-ldap' not in ansible_facts.packages"
+    - or
+    - "'php7.4-curl' not in ansible_facts.packages"
   notify: Restart Apache
 
 - name: Set proper permissions for Zabbix web directory
@@ -489,6 +548,18 @@
 - name: Show Apache config test result
   debug:
     msg: "Apache config test: {{ apache_config_test.stdout }}"
+
+- name: Check Apache HTTP accessibility
+  uri:
+    url: "http://localhost/"
+    method: GET
+    status_code: 200,302,301
+  register: apache_http_check
+  ignore_errors: yes
+
+- name: Show Apache HTTP check result
+  debug:
+    msg: "Apache HTTP check status: {{ apache_http_check.status }}"
 
 - name: Ensure services are enabled and started
   systemd:
