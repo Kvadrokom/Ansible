@@ -292,16 +292,37 @@
   when: not item.stat.exists
   notify: Restart Apache
 
+- name: Check if Zabbix Apache config exists in sites-available
+  stat:
+    path: /etc/apache2/sites-available/zabbix.conf
+  register: zabbix_site_available_stat
+
+- name: Check if Zabbix Apache base config exists
+  stat:
+    path: /etc/zabbix/apache.conf
+  register: zabbix_apache_conf_stat
+
+- name: Create symlink for Zabbix Apache site if needed
+  file:
+    src: /etc/zabbix/apache.conf
+    dest: /etc/apache2/sites-available/zabbix.conf
+    state: link
+  when: 
+    - zabbix_apache_conf_stat.stat.exists
+    - not zabbix_site_available_stat.stat.exists
+
 - name: Check if Zabbix site is enabled
   stat:
     path: /etc/apache2/sites-enabled/zabbix.conf
-  register: zabbix_site_stat
+  register: zabbix_site_enabled_stat
 
 - name: Enable Zabbix Apache site
   command:
     cmd: a2ensite zabbix.conf
     creates: /etc/apache2/sites-enabled/zabbix.conf
-  when: not zabbix_site_stat.stat.exists
+  when: 
+    - zabbix_site_available_stat.stat.exists or zabbix_apache_conf_stat.stat.exists
+    - not zabbix_site_enabled_stat.stat.exists
   notify: Restart Apache
 
 - name: Check current systemd service
