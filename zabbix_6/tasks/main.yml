@@ -1,4 +1,32 @@
 ---
+- name: Temporarily disable problematic repositories
+  block:
+    - name: Comment out bullseye-backports in sources.list
+      replace:
+        path: /etc/apt/sources.list
+        regexp: '^deb.*bullseye-backports'
+        replace: '# \g<0>'
+      register: backports_disabled
+
+    - name: Comment out bullseye-backports in sources.list.d files
+      find:
+        paths: /etc/apt/sources.list.d
+        patterns: "*.list"
+        contains: "bullseye-backports"
+      register: backports_files
+
+    - name: Disable backports in found files
+      replace:
+        path: "{{ item.path }}"
+        regexp: '^deb.*bullseye-backports'
+        replace: '# \g<0>'
+      loop: "{{ backports_files.files }}"
+      when: backports_files.matched > 0
+  rescue:
+    - name: Continue even if repository disabling fails
+      debug:
+        msg: "Could not disable backports repositories, continuing anyway"
+
 - name: Update package repositories
   apt:
     update_cache: yes
@@ -9,6 +37,7 @@
   apt:
     name:
       - ca-certificates
+      - python3-psycopg2
     state: present
 
 - name: Add Zabbix repository without signature check
@@ -16,22 +45,24 @@
     repo: "deb [trusted=yes] https://repo.zabbix.com/zabbix/{{ zabbix_version | default('6.0') }}/debian bullseye main"
     state: present
     filename: zabbix
+    update_cache: no
 
 - name: Update cache with Zabbix repository
   apt:
     update_cache: yes
     cache_valid_time: 3600
-  ignore_errors: true  # Игнорируем ошибки bullseye-backports
+  ignore_errors: true
 
-- name: Install Zabbix packages
+- name: Install Zabbix packages with PostgreSQL
   apt:
     name:
-      - zabbix-server-mysql
+      - zabbix-server-pgsql
       - zabbix-frontend-php
       - zabbix-apache-conf
       - zabbix-agent
       - zabbix-sql-scripts
-      - mariadb-server
+      - postgresql
+      - postgresql-contrib
     state: present
 
 - name: Generate en_US.UTF-8 locale
@@ -39,7 +70,7 @@
     name: en_US.UTF-8
     state: present
 
-- name: Create Zabbix user
+- name: Check if Zabbix user exists
   user:
     name: zabbix
     system: yes
@@ -60,54 +91,65 @@
     - /var/log/zabbix
     - /var/lib/zabbix
 
-- name: Ensure MariaDB is started and enabled
+- name: Ensure PostgreSQL is started and enabled
   systemd:
-    name: mariadb
+    name: postgresql
     state: started
     enabled: yes
 
-- name: Wait for MariaDB to start
+- name: Wait for PostgreSQL to start
   wait_for:
-    path: /var/run/mysqld/mysqld.sock
+    path: /var/run/postgresql/.s.PGSQL.5432
     state: present
     timeout: 30
 
-- name: Set MySQL root password
-  mysql_user:
-    name: root
-    host: localhost
-    password: "{{ mysql_root_password }}"
-    login_unix_socket: /var/run/mysqld/mysqld.sock
-    check_implicit_admin: yes
-    priv: "*.*:ALL,GRANT"
-    state: present
-
-- name: Create Zabbix database
-  mysql_db:
-    name: "{{ zabbix_db_name | default('zabbix') }}"
-    encoding: utf8mb4
-    collation: utf8mb4_bin
-    login_user: root
-    login_password: "{{ mysql_root_password }}"
-    state: present
-
-- name: Create Zabbix DB user
-  mysql_user:
+- name: Create Zabbix database user
+  become: true
+  become_user: postgres
+  postgresql_user:
     name: "{{ zabbix_db_user | default('zabbix') }}"
     password: "{{ zabbix_db_password }}"
-    host: localhost
-    priv: "{{ zabbix_db_name | default('zabbix') }}.*:ALL"
-    login_user: root
-    login_password: "{{ mysql_root_password }}"
+    role_attr_flags: "CREATEDB,NOSUPERUSER"
     state: present
 
-- name: Load Zabbix database schema
-  mysql_db:
+- name: Check if Zabbix database exists
+  become: true
+  become_user: postgres
+  postgresql_db:
     name: "{{ zabbix_db_name | default('zabbix') }}"
-    state: import
-    target: /usr/share/zabbix-sql-scripts/mysql/server.sql.gz
-    login_user: root
-    login_password: "{{ mysql_root_password }}"
+    state: present
+  register: zabbix_db_exists
+
+- name: Create Zabbix database
+  become: true
+  become_user: postgres
+  postgresql_db:
+    name: "{{ zabbix_db_name | default('zabbix') }}"
+    owner: "{{ zabbix_db_user | default('zabbix') }}"
+    encoding: UTF8
+    lc_collate: 'en_US.UTF-8'
+    lc_ctype: 'en_US.UTF-8'
+    template: template0
+    state: present
+  when: not zabbix_db_exists.changed
+
+- name: Check if schema is already loaded
+  become: true
+  become_user: postgres
+  shell: |
+    psql -d "{{ zabbix_db_name | default('zabbix') }}" -c "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public'" | grep -q -E '[1-9][0-9]*'
+  register: schema_check
+  changed_when: false
+  ignore_errors: true
+
+- name: Load Zabbix database schema
+  become: true
+  become_user: postgres
+  shell: |
+    zcat /usr/share/zabbix-sql-scripts/postgresql/server.sql.gz | psql -d "{{ zabbix_db_name | default('zabbix') }}" -U "{{ zabbix_db_user | default('zabbix') }}"
+  environment:
+    PGPASSWORD: "{{ zabbix_db_password }}"
+  when: schema_check.rc != 0
 
 - name: Configure Zabbix server settings
   lineinfile:
@@ -120,6 +162,7 @@
     - { option: DBName, value: "{{ zabbix_db_name | default('zabbix') }}" }
     - { option: DBUser, value: "{{ zabbix_db_user | default('zabbix') }}" }
     - { option: DBPassword, value: "{{ zabbix_db_password }}" }
+    - { option: DBPort, value: "5432" }
     - { option: User, value: zabbix }
     - { option: PidFile, value: /run/zabbix/zabbix_server.pid }
   notify: Restart Zabbix server
@@ -152,6 +195,11 @@
     group: www-data
     mode: '0755'
 
+- name: Check if web config file exists
+  stat:
+    path: /usr/share/zabbix/conf/zabbix.conf.php
+  register: web_config_stat
+
 - name: Create empty config file for web installer
   file:
     path: /usr/share/zabbix/conf/zabbix.conf.php
@@ -159,20 +207,39 @@
     owner: www-data
     group: www-data
     mode: '0644'
+  when: not web_config_stat.stat.exists
+
+- name: Check if Apache modules are enabled
+  stat:
+    path: /etc/apache2/mods-enabled/{{ item }}.load
+  loop:
+    - rewrite
+  register: apache_mods
 
 - name: Enable Apache modules
   command:
-    cmd: a2enmod {{ item }}
-    creates: /etc/apache2/mods-enabled/{{ item }}.load
-  loop:
-    - rewrite
+    cmd: a2enmod {{ item.item }}
+    creates: /etc/apache2/mods-enabled/{{ item.item }}.load
+  loop: "{{ apache_mods.results }}"
+  when: not item.stat.exists
   notify: Restart Apache
+
+- name: Check if Zabbix site is enabled
+  stat:
+    path: /etc/apache2/sites-enabled/zabbix.conf
+  register: zabbix_site_stat
 
 - name: Enable Zabbix Apache site
   command:
     cmd: a2ensite zabbix.conf
     creates: /etc/apache2/sites-enabled/zabbix.conf
+  when: not zabbix_site_stat.stat.exists
   notify: Restart Apache
+
+- name: Check current systemd service
+  stat:
+    path: /lib/systemd/system/zabbix-server.service
+  register: systemd_service_stat
 
 - name: Configure Zabbix systemd service
   copy:
@@ -181,9 +248,7 @@
       Description=Zabbix Server
       After=syslog.target
       After=network.target
-      After=mysql.service
-      After=mysqld.service
-      After=mariadb.service
+      After=postgresql.service
 
       [Service]
       Type=simple
@@ -201,7 +266,17 @@
       WantedBy=multi-user.target
     dest: /lib/systemd/system/zabbix-server.service
     mode: '0644'
+  when: systemd_service_stat.stat.exists
   notify: Reload systemd
+
+- name: Remove any existing corrupted PID files
+  file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /run/zabbix/zabbix_server.pid
+    - /run/zabbix/zabbix_agentd.pid
+  ignore_errors: true
 
 - name: Ensure services are enabled and started
   systemd:
@@ -213,6 +288,7 @@
     - zabbix-server
     - zabbix-agent
     - apache2
+    - postgresql
 
 - name: Flush handlers
   meta: flush_handlers
