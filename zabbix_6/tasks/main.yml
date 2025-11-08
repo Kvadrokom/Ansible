@@ -402,6 +402,94 @@
   when: item.stat.exists
   ignore_errors: true
 
+# НОВЫЕ ЗАДАЧИ ДЛЯ APACHE КОНФИГУРАЦИИ
+- name: Check Apache default site status
+  stat:
+    path: /etc/apache2/sites-enabled/000-default.conf
+  register: default_site_enabled
+
+- name: Disable default Apache site if enabled
+  command:
+    cmd: a2dissite 000-default.conf
+  when: default_site_enabled.stat.exists
+  notify: Restart Apache
+
+- name: Create Zabbix Apache configuration if missing
+  copy:
+    dest: /etc/apache2/sites-available/zabbix.conf
+    content: |
+      <VirtualHost *:80>
+          ServerName {{ ansible_host }}
+          DocumentRoot /usr/share/zabbix
+
+          <Directory "/usr/share/zabbix">
+              Options FollowSymLinks
+              AllowOverride None
+              Order allow,deny
+              Allow from all
+          </Directory>
+
+          <Directory "/usr/share/zabbix/conf">
+              Order deny,allow
+              Deny from all
+          </Directory>
+
+          ErrorLog ${APACHE_LOG_DIR}/zabbix_error.log
+          CustomLog ${APACHE_LOG_DIR}/zabbix_access.log combined
+      </VirtualHost>
+    owner: root
+    group: root
+    mode: '0644'
+  when: not zabbix_site_available_stat.stat.exists and not zabbix_apache_conf_stat.stat.exists
+  notify: Restart Apache
+
+- name: Ensure Zabbix site is enabled
+  command:
+    cmd: a2ensite zabbix.conf
+    creates: /etc/apache2/sites-enabled/zabbix.conf
+  when: not zabbix_site_enabled_stat.stat.exists
+  notify: Restart Apache
+
+- name: Check if Zabbix web files exist
+  stat:
+    path: /usr/share/zabbix/index.php
+  register: zabbix_web_check
+
+- name: Debug Zabbix web files
+  debug:
+    msg: "Zabbix web files found: {{ zabbix_web_check.stat.exists }}"
+
+- name: Install required PHP modules for Zabbix
+  apt:
+    name:
+      - php7.4
+      - php7.4-pgsql
+      - php7.4-bcmath
+      - php7.4-mbstring
+      - php7.4-gd
+      - php7.4-xml
+      - php7.4-ldap
+      - php7.4-curl
+    state: present
+  notify: Restart Apache
+
+- name: Set proper permissions for Zabbix web directory
+  file:
+    path: /usr/share/zabbix
+    owner: www-data
+    group: www-data
+    mode: '0755'
+    recurse: yes
+
+- name: Verify Apache configuration syntax
+  command: apache2ctl configtest
+  register: apache_config_test
+  changed_when: false
+
+- name: Show Apache config test result
+  debug:
+    msg: "Apache config test: {{ apache_config_test.stdout }}"
+
 - name: Ensure services are enabled and started
   systemd:
     name: "{{ item }}"
