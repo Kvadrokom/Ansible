@@ -494,19 +494,3 @@
     - name: Show Zabbix web interface status
       debug:
         msg: "Zabbix web interface status: {{ zabbix_web_check.status }}"
-
-  handlers:
-    - name: Restart Zabbix server
-      systemd:
-        name: zabbix-server
-        state: restarted
-
-    - name: Restart Zabbix agent
-      systemd:
-        name: zabbix-agent
-        state: restarted
-
-    - name: Restart Apache
-      systemd:
-        name: apache2
-        state: restarted
