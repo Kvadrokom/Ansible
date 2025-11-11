@@ -1,496 +1,499 @@
 ---
-    - name: Check if Zabbix is already installed
-      package_facts:
-        manager: auto
+- name: Check if Zabbix is already installed
+  package_facts:
+    manager: auto
+  register: pkg_facts
 
-    - name: Fail if zabbix_db_password is not defined
-      fail:
-        msg: "zabbix_db_password must be defined"
-      when: zabbix_db_password is not defined
+- name: Fail if zabbix_db_password is not defined
+  fail:
+    msg: "zabbix_db_password must be defined"
+  when: zabbix_db_password is not defined
 
-    - name: Install minimal dependencies
-      apt:
-        name:
-          - ca-certificates
-          - python3-psycopg2
-        state: present
+- name: Install minimal dependencies
+  apt:
+    name:
+      - ca-certificates
+      - python3-psycopg2
+    state: present
+  when: ("ca-certificates" not in pkg_facts.ansible_facts.packages or
+         "python3-psycopg2" not in pkg_facts.ansible_facts.packages)
 
-    - name: Update package cache (ignore temporary errors)
-      apt:
-        update_cache: yes
-        cache_valid_time: 3600
-      ignore_errors: yes
-      register: apt_update_result
-      changed_when: apt_update_result.rc == 0
+- name: Update package cache (ignore temporary errors)
+  apt:
+    update_cache: yes
+    cache_valid_time: 3600
+  ignore_errors: true
+  register: apt_update_result
+  changed_when: apt_update_result.rc == 0
 
-    - name: Temporarily disable problematic repositories if update failed
-      block:
-        - name: Check if bullseye-backports needs commenting in sources.list
-          shell: |
-            grep -q '^[^#].*bullseye-backports' /etc/apt/sources.list && echo "needs_comment" || echo "already_commented"
-          register: backports_check
-          changed_when: false
+- name: Temporarily disable problematic repositories if update failed
+  block:
+    - name: Check if bullseye-backports needs commenting in sources.list
+      shell: |
+        grep -q '^[^#].*bullseye-backports' /etc/apt/sources.list && echo "needs_comment" || echo "already_commented"
+      register: backports_check
+      changed_when: false
 
-        - name: Comment out bullseye-backports in sources.list
-          replace:
-            path: /etc/apt/sources.list
-            regexp: '^[^#]deb.*bullseye-backports'
-            replace: '# \g<0>'
-          when: 
-            - apt_update_result.failed
-            - "'needs_comment' in backports_check.stdout"
-          register: sources_comment
+    - name: Comment out bullseye-backports in sources.list
+      replace:
+        path: /etc/apt/sources.list
+        regexp: '^[^#]deb.*bullseye-backports'
+        replace: '# \g<0>'
+      when:
+        - apt_update_result.failed
+        - "'needs_comment' in backports_check.stdout"
+      register: sources_comment
 
-        - name: Find files containing bullseye-backports
-          find:
-            paths: /etc/apt/sources.list.d
-            patterns: "*.list"
-            contains: "bullseye-backports"
-          register: backports_files
-          when: apt_update_result.failed
-
-        - name: Comment out bullseye-backports in found files
-          replace:
-            path: "{{ item.path }}"
-            regexp: '^[^#]deb.*bullseye-backports'
-            replace: '# \g<0>'
-          loop: "{{ backports_files.files }}"
-          when: 
-            - apt_update_result.failed
-            - backports_files.matched > 0
-          register: files_comment
-
-        - name: Update package repositories after disabling problematic repos
-          apt:
-            update_cache: yes
-            cache_valid_time: 3600
-          when: apt_update_result.failed
-          register: apt_update_retry
+    - name: Find files containing bullseye-backports
+      find:
+        paths: /etc/apt/sources.list.d
+        patterns: "*.list"
+        contains: "bullseye-backports"
+      register: backports_files
       when: apt_update_result.failed
-      rescue:
-        - name: Continue even if repository disabling fails
-          debug:
-            msg: "Could not disable backports repositories, continuing anyway"
 
-    - name: Check if Zabbix repository is already configured
-      shell: |
-        grep -r "repo.zabbix.com" /etc/apt/sources.list* | grep -q "6.0" && echo "exists" || echo "missing"
-      register: zabbix_repo_check
-      changed_when: false
+    - name: Comment out bullseye-backports in found files
+      replace:
+        path: "{{ item.path }}"
+        regexp: '^[^#]deb.*bullseye-backports'
+        replace: '# \g<0>'
+      loop: "{{ backports_files.files }}"
+      when:
+        - apt_update_result.failed
+        - backports_files.matched > 0
+      register: files_comment
 
-    - name: Add Zabbix repository
-      apt_repository:
-        repo: "deb [trusted=yes] https://repo.zabbix.com/zabbix/6.0/debian bullseye main"
-        state: present
-        filename: zabbix
-        update_cache: no
-      when: "'missing' in zabbix_repo_check.stdout"
-      register: zabbix_repo_added
-
-    - name: Update cache with Zabbix repository only if repo was added
+    - name: Update package repositories after disabling problematic repos
       apt:
         update_cache: yes
         cache_valid_time: 3600
-      when: zabbix_repo_added is defined and zabbix_repo_added is changed
-
-    - name: Install Zabbix packages with PostgreSQL
-      apt:
-        name: "{{ item }}"
-        state: present
-      loop:
-        - zabbix-server-pgsql
-        - zabbix-frontend-php
-        - zabbix-apache-conf
-        - zabbix-agent
-        - zabbix-sql-scripts
-        - postgresql
-        - postgresql-contrib
-      when: item not in ansible_facts.packages
-
-    - name: Generate en_US.UTF-8 locale
-      locale_gen:
-        name: en_US.UTF-8
-        state: present
-
-    - name: Check if Zabbix user exists
-      user:
-        name: zabbix
-        state: present
-      register: zabbix_user_check
-      changed_when: false
-
-    - name: Create Zabbix user
-      user:
-        name: zabbix
-        system: yes
-        shell: /bin/false
-        home: /var/lib/zabbix
-        create_home: yes
-        state: present
-      when: not zabbix_user_check.changed
-
-    - name: Create Zabbix directories
-      file:
-        path: "{{ item }}"
-        state: directory
-        owner: zabbix
-        group: zabbix
-        mode: '0755'
-      loop:
-        - /run/zabbix
-        - /var/log/zabbix
-        - /var/lib/zabbix
-        - /etc/zabbix/zabbix_agentd.d
-
-    - name: Ensure PostgreSQL is started and enabled
-      systemd:
-        name: postgresql
-        state: started
-        enabled: yes
-
-    - name: Wait for PostgreSQL to start
-      wait_for:
-        path: /var/run/postgresql/.s.PGSQL.5432
-        state: present
-        timeout: 30
-
-    - name: Check if Zabbix database user exists
-      become: yes
-      become_user: postgres
-      shell: |
-        psql -t -c "SELECT 1 FROM pg_roles WHERE rolname='{{ zabbix_db_user }}'" | grep -q 1
-      register: zabbix_user_exists
-      changed_when: false
-      ignore_errors: yes
-
-    - name: Create Zabbix database user
-      become: yes
-      become_user: postgres
-      postgresql_user:
-        name: "{{ zabbix_db_user }}"
-        password: "{{ zabbix_db_password }}"
-        role_attr_flags: "CREATEDB,NOSUPERUSER"
-        state: present
-      when: zabbix_user_exists.rc != 0
-
-    - name: Check if Zabbix database exists
-      become: yes
-      become_user: postgres
-      shell: |
-        psql -l | grep -q "{{ zabbix_db_name }}|"
-      register: zabbix_db_exists
-      changed_when: false
-      ignore_errors: yes
-
-    - name: Create Zabbix database
-      become: yes
-      become_user: postgres
-      postgresql_db:
-        name: "{{ zabbix_db_name }}"
-        owner: "{{ zabbix_db_user }}"
-        encoding: UTF8
-        template: template0
-        state: present
-      when: zabbix_db_exists.rc != 0
-
-    - name: Check if zabbix schema exists
-      become: yes
-      become_user: postgres
-      shell: |
-        psql -d "{{ zabbix_db_name }}" -t -c "SELECT 1 FROM information_schema.schemata WHERE schema_name='zabbix'" | grep -q 1
-      register: zabbix_schema_exists
-      changed_when: false
-      ignore_errors: yes
-
-    - name: Create zabbix schema and grant permissions
-      become: yes
-      become_user: postgres
-      shell: |
-        psql -d "{{ zabbix_db_name }}" -c "CREATE SCHEMA IF NOT EXISTS zabbix;"
-        psql -d "{{ zabbix_db_name }}" -c "GRANT USAGE ON SCHEMA zabbix TO {{ zabbix_db_user }};"
-        psql -d "{{ zabbix_db_name }}" -c "ALTER DEFAULT PRIVILEGES IN SCHEMA zabbix GRANT ALL ON TABLES TO {{ zabbix_db_user }};"
-        psql -d "{{ zabbix_db_name }}" -c "ALTER DEFAULT PRIVILEGES IN SCHEMA zabbix GRANT ALL ON SEQUENCES TO {{ zabbix_db_user }};"
-      when: zabbix_schema_exists.rc != 0
-
-    - name: Check if dbversion table exists in zabbix schema
-      become: yes
-      become_user: postgres
-      shell: |
-        psql -d "{{ zabbix_db_name }}" -t -c "SELECT 1 FROM information_schema.tables WHERE table_schema='zabbix' AND table_name='dbversion'" | grep -q 1
-      register: dbversion_table_exists
-      changed_when: false
-      ignore_errors: yes
-
-    - name: Load Zabbix database schema into zabbix schema
-      become: yes
-      become_user: postgres
-      shell: |
-        zcat /usr/share/zabbix-sql-scripts/postgresql/server.sql.gz | psql -d "{{ zabbix_db_name }}" -v schema=zabbix
-      environment:
-        PGPASSWORD: "{{ zabbix_db_password }}"
-      when: dbversion_table_exists.rc != 0
-
-    - name: Check if version column exists in dbversion table
-      become: yes
-      become_user: postgres
-      shell: |
-        psql -d "{{ zabbix_db_name }}" -t -c "SELECT 1 FROM information_schema.columns WHERE table_schema='zabbix' AND table_name='dbversion' AND column_name='version'" | grep -q 1
-      register: version_column_exists
-      changed_when: false
-      ignore_errors: yes
-
-    - name: Add version column to dbversion table for compatibility
-      become: yes
-      become_user: postgres
-      shell: |
-        psql -d "{{ zabbix_db_name }}" -c "ALTER TABLE zabbix.dbversion ADD COLUMN IF NOT EXISTS version INTEGER;"
-        psql -d "{{ zabbix_db_name }}" -c "UPDATE zabbix.dbversion SET version = mandatory;"
-        psql -d "{{ zabbix_db_name }}" -c "ALTER TABLE zabbix.dbversion ALTER COLUMN version SET NOT NULL;"
-      when: version_column_exists.rc != 0
-
-    - name: Check if Zabbix server config exists
-      stat:
-        path: /etc/zabbix/zabbix_server.conf
-      register: server_conf_stat
-
-    - name: Configure Zabbix server settings
-      lineinfile:
-        path: /etc/zabbix/zabbix_server.conf
-        regexp: "^{{ item.option }}=.*"
-        line: "{{ item.option }}={{ item.value }}"
-        state: present
-        backup: yes
-      loop:
-        - { option: DBHost, value: localhost }
-        - { option: DBName, value: "{{ zabbix_db_name }}" }
-        - { option: DBUser, value: "{{ zabbix_db_user }}" }
-        - { option: DBPassword, value: "{{ zabbix_db_password }}" }
-        - { option: DBPort, value: "5432" }
-        - { option: User, value: zabbix }
-        - { option: PidFile, value: /run/zabbix/zabbix_server.pid }
-      when: server_conf_stat.stat.exists
-      notify: Restart Zabbix server
-
-    - name: Fix Zabbix server config permissions
-      file:
-        path: /etc/zabbix/zabbix_server.conf
-        owner: zabbix
-        group: zabbix
-        mode: '0640'
-      when: server_conf_stat.stat.exists
-
-    - name: Check if Zabbix agent config exists
-      stat:
-        path: /etc/zabbix/zabbix_agentd.conf
-      register: agent_conf_stat
-
-    - name: Create basic Zabbix agent config
-      copy:
-        content: |
-          PidFile=/run/zabbix/zabbix_agentd.pid
-          LogFile=/var/log/zabbix/zabbix_agentd.log
-          LogFileSize=0
-          Server=127.0.0.1
-          ServerActive=127.0.0.1
-          Hostname=zabbix-server
-          Include=/etc/zabbix/zabbix_agentd.d/*.conf
-        dest: /etc/zabbix/zabbix_agentd.conf
-        owner: zabbix
-        group: zabbix
-        mode: '0640'
-      when: not agent_conf_stat.stat.exists
-      notify: Restart Zabbix agent
-
-    - name: Configure PHP settings for Zabbix
-      lineinfile:
-        path: /etc/php/7.4/apache2/php.ini
-        regexp: "^{{ item.option }} =.*"
-        line: "{{ item.option }} = {{ item.value }}"
-        state: present
-        backup: yes
-      loop:
-        - { option: post_max_size, value: "16M" }
-        - { option: max_execution_time, value: "300" }
-        - { option: max_input_time, value: "300" }
-        - { option: memory_limit, value: "128M" }
-        - { option: date.timezone, value: "{{ php_timezone }}" }
-      notify: Restart Apache
-
-    - name: Install required PHP modules for Zabbix
-      apt:
-        name: "{{ item }}"
-        state: present
-      loop:
-        - php7.4-pgsql
-        - php7.4-bcmath
-        - php7.4-mbstring
-        - php7.4-gd
-        - php7.4-xml
-        - php7.4-ldap
-        - php7.4-curl
-      when: item not in ansible_facts.packages
-      notify: Restart Apache
-
-    - name: Check if Zabbix web config directory exists
-      stat:
-        path: /usr/share/zabbix/conf
-      register: web_conf_dir_stat
-
-    - name: Create Zabbix web config directory
-      file:
-        path: /usr/share/zabbix/conf
-        state: directory
-        owner: www-data
-        group: www-data
-        mode: '0755'
-      when: not web_conf_dir_stat.stat.exists
-
-    - name: Check if Apache modules are enabled
-      stat:
-        path: /etc/apache2/mods-enabled/{{ item }}.load
-      loop:
-        - rewrite
-        - dir
-      register: apache_mods
-
-    - name: Enable required Apache modules
-      command:
-        cmd: "a2enmod {{ item.item }}"
-        creates: "/etc/apache2/mods-enabled/{{ item.item }}.load"
-      loop: "{{ apache_mods.results }}"
-      when: not item.stat.exists
-      notify: Restart Apache
-
-    - name: Check if default Apache site is enabled
-      stat:
-        path: /etc/apache2/sites-enabled/000-default.conf
-      register: default_site_enabled
-
-    - name: Disable default Apache site
-      command:
-        cmd: a2dissite 000-default.conf
-      when: default_site_enabled.stat.exists
-      notify: Restart Apache
-
-    - name: Check if Zabbix Apache config exists
-      stat:
-        path: /etc/apache2/sites-available/zabbix.conf
-      register: zabbix_site_available
-
-    - name: Create Zabbix Apache configuration
-      copy:
-        dest: /etc/apache2/sites-available/zabbix.conf
-        content: |
-          <VirtualHost *:80>
-              ServerName {{ ansible_host }}
-              DocumentRoot /usr/share/zabbix
-
-              <Directory "/usr/share/zabbix">
-                  Options FollowSymLinks
-                  AllowOverride None
-                  Require all granted
-              </Directory>
-
-              <Directory "/usr/share/zabbix/conf">
-                  Require all denied
-              </Directory>
-
-              ErrorLog ${APACHE_LOG_DIR}/zabbix_error.log
-              CustomLog ${APACHE_LOG_DIR}/zabbix_access.log combined
-          </VirtualHost>
-        owner: root
-        group: root
-        mode: '0644'
-      when: not zabbix_site_available.stat.exists
-      notify: Restart Apache
-
-    - name: Check if Zabbix site is enabled
-      stat:
-        path: /etc/apache2/sites-enabled/zabbix.conf
-      register: zabbix_site_enabled
-
-    - name: Enable Zabbix Apache site
-      command:
-        cmd: a2ensite zabbix.conf
-        creates: "/etc/apache2/sites-enabled/zabbix.conf"
-      when: not zabbix_site_enabled.stat.exists
-      notify: Restart Apache
-
-    - name: Set proper permissions for Zabbix web directory
-      file:
-        path: /usr/share/zabbix
-        owner: www-data
-        group: www-data
-        mode: '0755'
-
-    - name: Ensure services are enabled and started
-      systemd:
-        name: "{{ item }}"
-        state: started
-        enabled: yes
-        daemon_reload: yes
-      loop:
-        - zabbix-server
-        - zabbix-agent
-        - apache2
-        - postgresql
-      ignore_errors: yes
-      register: services_started
-
-    - name: Wait for Apache to start
-      wait_for:
-        host: localhost
-        port: 80
-        timeout: 30
-      ignore_errors: yes
-      register: apache_port_check
-
-    - name: Check Apache service status
-      systemd:
-        name: apache2
-        state: started
-      register: apache_service_status
-
-    - name: Show Apache status
+      when: apt_update_result.failed
+      register: apt_update_retry
+  when: apt_update_result.failed
+  rescue:
+    - name: Continue even if repository disabling fails
       debug:
-        msg: |
-          Apache service: {{ apache_service_status.status }}
-          Apache port 80: {{ apache_port_check.state if apache_port_check is defined else 'unknown' }}
+        msg: "Could not disable backports repositories, continuing anyway"
 
-    - name: Check Apache configuration syntax
-      command: apache2ctl configtest
-      register: apache_config_test
-      changed_when: false
-      ignore_errors: yes
+- name: Check if Zabbix repository is already configured
+  shell: |
+    grep -r "repo.zabbix.com" /etc/apt/sources.list* | grep -q "6.0" && echo "exists" || echo "missing"
+  register: zabbix_repo_check
+  changed_when: false
 
-    - name: Show Apache config test result
-      debug:
-        msg: "Apache config test: {{ apache_config_test.stdout }}"
+- name: Add Zabbix repository
+  apt_repository:
+    repo: "deb [trusted=yes] https://repo.zabbix.com/zabbix/6.0/debian bullseye main"
+    state: present
+    filename: zabbix
+    update_cache: no
+  when: "'missing' in zabbix_repo_check.stdout"
+  register: zabbix_repo_added
 
-    - name: Check Apache HTTP accessibility
-      uri:
-        url: "http://localhost/"
-        method: GET
-        status_code: 200,302,301
-      register: apache_http_check
-      ignore_errors: yes
-      delay: 5
-      retries: 3
+- name: Update cache with Zabbix repository only if repo was added
+  apt:
+    update_cache: yes
+    cache_valid_time: 3600
+  when: zabbix_repo_added is defined and zabbix_repo_added is changed
 
-    - name: Show Apache HTTP check result
-      debug:
-        msg: "Apache HTTP check status: {{ apache_http_check.status }}"
+- name: Install Zabbix packages with PostgreSQL
+  apt:
+    name: "{{ item }}"
+    state: present
+  loop:
+    - zabbix-server-pgsql
+    - zabbix-frontend-php
+    - zabbix-apache-conf
+    - zabbix-agent
+    - zabbix-sql-scripts
+    - postgresql
+    - postgresql-contrib
+  when: item not in pkg_facts.ansible_facts.packages
 
-    - name: Verify Zabbix web interface accessibility
-      uri:
-        url: "http://localhost/setup.php"
-        method: GET
-        status_code: 200
-      register: zabbix_web_check
-      ignore_errors: yes
-      delay: 5
-      retries: 3
+- name: Generate en_US.UTF-8 locale
+  locale_gen:
+    name: en_US.UTF-8
+    state: present
 
-    - name: Show Zabbix web interface status
-      debug:
-        msg: "Zabbix web interface status: {{ zabbix_web_check.status }}"
+- name: Check if Zabbix user exists
+  user:
+    name: zabbix
+    state: present
+  register: zabbix_user_check
+  changed_when: false
+
+- name: Create Zabbix user
+  user:
+    name: zabbix
+    system: yes
+    shell: /bin/false
+    home: /var/lib/zabbix
+    create_home: yes
+    state: present
+  when: not zabbix_user_check.changed
+
+- name: Create Zabbix directories
+  file:
+    path: "{{ item }}"
+    state: directory
+    owner: zabbix
+    group: zabbix
+    mode: '0755'
+  loop:
+    - /run/zabbix
+    - /var/log/zabbix
+    - /var/lib/zabbix
+    - /etc/zabbix/zabbix_agentd.d
+
+- name: Ensure PostgreSQL is started and enabled
+  systemd:
+    name: postgresql
+    state: started
+    enabled: yes
+
+- name: Wait for PostgreSQL to start
+  wait_for:
+    path: /var/run/postgresql/.s.PGSQL.5432
+    state: present
+    timeout: 30
+
+- name: Check if Zabbix database user exists
+  become: yes
+  become_user: postgres
+  shell: |
+    psql -t -c "SELECT 1 FROM pg_roles WHERE rolname='{{ zabbix_db_user }}'" | grep -q 1
+  register: zabbix_user_exists
+  changed_when: false
+  ignore_errors: yes
+
+- name: Create Zabbix database user
+  become: yes
+  become_user: postgres
+  postgresql_user:
+    name: "{{ zabbix_db_user }}"
+    password: "{{ zabbix_db_password }}"
+    role_attr_flags: "CREATEDB,NOSUPERUSER"
+    state: present
+  when: zabbix_user_exists.rc != 0
+
+- name: Check if Zabbix database exists
+  become: yes
+  become_user: postgres
+  shell: |
+    psql -l | grep -q "{{ zabbix_db_name }}|"
+  register: zabbix_db_exists
+  changed_when: false
+  ignore_errors: yes
+
+- name: Create Zabbix database
+  become: yes
+  become_user: postgres
+  postgresql_db:
+    name: "{{ zabbix_db_name }}"
+    owner: "{{ zabbix_db_user }}"
+    encoding: UTF8
+    template: template0
+    state: present
+  when: zabbix_db_exists.rc != 0
+
+- name: Check if zabbix schema exists
+  become: yes
+  become_user: postgres
+  shell: |
+    psql -d "{{ zabbix_db_name }}" -t -c "SELECT 1 FROM information_schema.schemata WHERE schema_name='zabbix'" | grep -q 1
+  register: zabbix_schema_exists
+  changed_when: false
+  ignore_errors: yes
+
+- name: Create zabbix schema and grant permissions
+  become: yes
+  become_user: postgres
+  shell: |
+    psql -d "{{ zabbix_db_name }}" -c "CREATE SCHEMA IF NOT EXISTS zabbix;"
+    psql -d "{{ zabbix_db_name }}" -c "GRANT USAGE ON SCHEMA zabbix TO {{ zabbix_db_user }};"
+    psql -d "{{ zabbix_db_name }}" -c "ALTER DEFAULT PRIVILEGES IN SCHEMA zabbix GRANT ALL ON TABLES TO {{ zabbix_db_user }};"
+    psql -d "{{ zabbix_db_name }}" -c "ALTER DEFAULT PRIVILEGES IN SCHEMA zabbix GRANT ALL ON SEQUENCES TO {{ zabbix_db_user }};"
+  when: zabbix_schema_exists.rc != 0
+
+- name: Check if dbversion table exists in zabbix schema
+  become: yes
+  become_user: postgres
+  shell: |
+    psql -d "{{ zabbix_db_name }}" -t -c "SELECT 1 FROM information_schema.tables WHERE table_schema='zabbix' AND table_name='dbversion'" | grep -q 1
+  register: dbversion_table_exists
+  changed_when: false
+  ignore_errors: yes
+
+- name: Load Zabbix database schema into zabbix schema
+  become: yes
+  become_user: postgres
+  shell: |
+    zcat /usr/share/zabbix-sql-scripts/postgresql/server.sql.gz | psql -d "{{ zabbix_db_name }}" -v schema=zabbix
+  environment:
+    PGPASSWORD: "{{ zabbix_db_password }}"
+  when: dbversion_table_exists.rc != 0
+
+- name: Check if version column exists in dbversion table
+  become: yes
+  become_user: postgres
+  shell: |
+    psql -d "{{ zabbix_db_name }}" -t -c "SELECT 1 FROM information_schema.columns WHERE table_schema='zabbix' AND table_name='dbversion' AND column_name='version'" | grep -q 1
+  register: version_column_exists
+  changed_when: false
+  ignore_errors: yes
+
+- name: Add version column to dbversion table for compatibility
+  become: yes
+  become_user: postgres
+  shell: |
+    psql -d "{{ zabbix_db_name }}" -c "ALTER TABLE zabbix.dbversion ADD COLUMN IF NOT EXISTS version INTEGER;"
+    psql -d "{{ zabbix_db_name }}" -c "UPDATE zabbix.dbversion SET version = mandatory;"
+    psql -d "{{ zabbix_db_name }}" -c "ALTER TABLE zabbix.dbversion ALTER COLUMN version SET NOT NULL;"
+  when: version_column_exists.rc != 0
+
+- name: Check if Zabbix server config exists
+  stat:
+    path: /etc/zabbix/zabbix_server.conf
+  register: server_conf_stat
+
+- name: Configure Zabbix server settings
+  lineinfile:
+    path: /etc/zabbix/zabbix_server.conf
+    regexp: "^{{ item.option }}=.*"
+    line: "{{ item.option }}={{ item.value }}"
+    state: present
+    backup: yes
+  loop:
+    - { option: DBHost, value: localhost }
+    - { option: DBName, value: "{{ zabbix_db_name }}" }
+    - { option: DBUser, value: "{{ zabbix_db_user }}" }
+    - { option: DBPassword, value: "{{ zabbix_db_password }}" }
+    - { option: DBPort, value: "5432" }
+    - { option: User, value: zabbix }
+    - { option: PidFile, value: /run/zabbix/zabbix_server.pid }
+  when: server_conf_stat.stat.exists
+  notify: Restart Zabbix server
+
+- name: Fix Zabbix server config permissions
+  file:
+    path: /etc/zabbix/zabbix_server.conf
+    owner: zabbix
+    group: zabbix
+    mode: '0640'
+  when: server_conf_stat.stat.exists
+
+- name: Check if Zabbix agent config exists
+  stat:
+    path: /etc/zabbix/zabbix_agentd.conf
+  register: agent_conf_stat
+
+- name: Create basic Zabbix agent config
+  copy:
+    content: |
+      PidFile=/run/zabbix/zabbix_agentd.pid
+      LogFile=/var/log/zabbix/zabbix_agentd.log
+      LogFileSize=0
+      Server=127.0.0.1
+      ServerActive=127.0.0.1
+      Hostname=zabbix-server
+      Include=/etc/zabbix/zabbix_agentd.d/*.conf
+    dest: /etc/zabbix/zabbix_agentd.conf
+    owner: zabbix
+    group: zabbix
+    mode: '0640'
+  when: not agent_conf_stat.stat.exists
+  notify: Restart Zabbix agent
+
+- name: Configure PHP settings for Zabbix
+  lineinfile:
+    path: /etc/php/7.4/apache2/php.ini
+    regexp: "^{{ item.option }} =.*"
+    line: "{{ item.option }} = {{ item.value }}"
+    state: present
+    backup: yes
+  loop:
+    - { option: post_max_size, value: "16M" }
+    - { option: max_execution_time, value: "300" }
+    - { option: max_input_time, value: "300" }
+    - { option: memory_limit, value: "128M" }
+    - { option: date.timezone, value: "{{ php_timezone }}" }
+  notify: Restart Apache
+
+- name: Install required PHP modules for Zabbix
+  apt:
+    name: "{{ item }}"
+    state: present
+  loop:
+    - php7.4-pgsql
+    - php7.4-bcmath
+    - php7.4-mbstring
+    - php7.4-gd
+    - php7.4-xml
+    - php7.4-ldap
+    - php7.4-curl
+  when: item not in pkg_facts.ansible_facts.packages
+  notify: Restart Apache
+
+- name: Check if Zabbix web config directory exists
+  stat:
+    path: /usr/share/zabbix/conf
+  register: web_conf_dir_stat
+
+- name: Create Zabbix web config directory
+  file:
+    path: /usr/share/zabbix/conf
+    state: directory
+    owner: www-data
+    group: www-data
+    mode: '0755'
+  when: not web_conf_dir_stat.stat.exists
+
+- name: Check if Apache modules are enabled
+  stat:
+    path: /etc/apache2/mods-enabled/{{ item }}.load
+  loop:
+    - rewrite
+    - dir
+  register: apache_mods
+
+- name: Enable required Apache modules
+  command:
+    cmd: "a2enmod {{ item.item }}"
+    creates: "/etc/apache2/mods-enabled/{{ item.item }}.load"
+  loop: "{{ apache_mods.results }}"
+  when: not item.stat.exists
+  notify: Restart Apache
+
+- name: Check if default Apache site is enabled
+  stat:
+    path: /etc/apache2/sites-enabled/000-default.conf
+  register: default_site_enabled
+
+- name: Disable default Apache site
+  command:
+    cmd: a2dissite 000-default.conf
+  when: default_site_enabled.stat.exists
+  notify: Restart Apache
+
+- name: Check if Zabbix Apache config exists
+  stat:
+    path: /etc/apache2/sites-available/zabbix.conf
+  register: zabbix_site_available
+
+- name: Create Zabbix Apache configuration
+  copy:
+    dest: /etc/apache2/sites-available/zabbix.conf
+    content: |
+      <VirtualHost *:80>
+          ServerName {{ ansible_host }}
+          DocumentRoot /usr/share/zabbix
+
+          <Directory "/usr/share/zabbix">
+              Options FollowSymLinks
+              AllowOverride None
+              Require all granted
+          </Directory>
+
+          <Directory "/usr/share/zabbix/conf">
+              Require all denied
+          </Directory>
+
+          ErrorLog ${APACHE_LOG_DIR}/zabbix_error.log
+          CustomLog ${APACHE_LOG_DIR}/zabbix_access.log combined
+      </VirtualHost>
+    owner: root
+    group: root
+    mode: '0644'
+  when: not zabbix_site_available.stat.exists
+  notify: Restart Apache
+
+- name: Check if Zabbix site is enabled
+  stat:
+    path: /etc/apache2/sites-enabled/zabbix.conf
+  register: zabbix_site_enabled
+
+- name: Enable Zabbix Apache site
+  command:
+    cmd: a2ensite zabbix.conf
+    creates: "/etc/apache2/sites-enabled/zabbix.conf"
+  when: not zabbix_site_enabled.stat.exists
+  notify: Restart Apache
+
+- name: Set proper permissions for Zabbix web directory
+  file:
+    path: /usr/share/zabbix
+    owner: www-data
+    group: www-data
+    mode: '0755'
+
+- name: Ensure services are enabled and started
+  systemd:
+    name: "{{ item }}"
+    state: started
+    enabled: yes
+    daemon_reload: yes
+  loop:
+    - zabbix-server
+    - zabbix-agent
+    - apache2
+    - postgresql
+  ignore_errors: yes
+  register: services_started
+
+- name: Wait for Apache to start
+  wait_for:
+    host: localhost
+    port: 80
+    timeout: 30
+  ignore_errors: yes
+  register: apache_port_check
+
+- name: Check Apache service status
+  systemd:
+    name: apache2
+    state: started
+  register: apache_service_status
+
+- name: Show Apache status
+  debug:
+    msg: |
+      Apache service: {{ apache_service_status.status }}
+      Apache port 80: {{ apache_port_check.state if apache_port_check is defined else 'unknown' }}
+
+- name: Check Apache configuration syntax
+  command: apache2ctl configtest
+  register: apache_config_test
+  changed_when: false
+  ignore_errors: yes
+
+- name: Show Apache config test result
+  debug:
+    msg: "Apache config test: {{ apache_config_test.stdout }}"
+
+- name: Check Apache HTTP accessibility
+  uri:
+    url: "http://localhost/"
+    method: GET
+    status_code: 200,302,301
+  register: apache_http_check
+  ignore_errors: yes
+  delay: 5
+  retries: 3
+
+- name: Show Apache HTTP check result
+  debug:
+    msg: "Apache HTTP check status: {{ apache_http_check.status }}"
+
+- name: Verify Zabbix web interface accessibility
+  uri:
+    url: "http://localhost/setup.php"
+    method: GET
+    status_code: 200
+  register: zabbix_web_check
+  ignore_errors: yes
+  delay: 5
+  retries: 3
+
+- name: Show Zabbix web interface status
+  debug:
+    msg: "Zabbix web interface status: {{ zabbix_web_check.status }}"
