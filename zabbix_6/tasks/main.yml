@@ -12,7 +12,6 @@
     - name: Check if Zabbix is already installed
       package_facts:
         manager: auto
-      register: zabbix_packages
 
     - name: Fail if zabbix_db_password is not defined
       fail:
@@ -123,6 +122,13 @@
         name: en_US.UTF-8
         state: present
 
+    - name: Check if Zabbix user exists
+      user:
+        name: zabbix
+        state: present
+      register: zabbix_user_check
+      changed_when: false
+
     - name: Create Zabbix user
       user:
         name: zabbix
@@ -131,6 +137,7 @@
         home: /var/lib/zabbix
         create_home: yes
         state: present
+      when: not zabbix_user_check.changed
 
     - name: Create Zabbix directories
       file:
@@ -174,7 +181,7 @@
         password: "{{ zabbix_db_password }}"
         role_attr_flags: "CREATEDB,NOSUPERUSER"
         state: present
-      when: not zabbix_user_exists.changed
+      when: zabbix_user_exists.rc != 0
 
     - name: Check if Zabbix database exists
       become: yes
@@ -194,7 +201,7 @@
         encoding: UTF8
         template: template0
         state: present
-      when: not zabbix_db_exists.changed
+      when: zabbix_db_exists.rc != 0
 
     - name: Check if zabbix schema exists
       become: yes
@@ -213,7 +220,7 @@
         psql -d "{{ zabbix_db_name }}" -c "GRANT USAGE ON SCHEMA zabbix TO {{ zabbix_db_user }};"
         psql -d "{{ zabbix_db_name }}" -c "ALTER DEFAULT PRIVILEGES IN SCHEMA zabbix GRANT ALL ON TABLES TO {{ zabbix_db_user }};"
         psql -d "{{ zabbix_db_name }}" -c "ALTER DEFAULT PRIVILEGES IN SCHEMA zabbix GRANT ALL ON SEQUENCES TO {{ zabbix_db_user }};"
-      when: not zabbix_schema_exists.changed
+      when: zabbix_schema_exists.rc != 0
 
     - name: Check if dbversion table exists in zabbix schema
       become: yes
@@ -231,7 +238,7 @@
         zcat /usr/share/zabbix-sql-scripts/postgresql/server.sql.gz | psql -d "{{ zabbix_db_name }}" -v schema=zabbix
       environment:
         PGPASSWORD: "{{ zabbix_db_password }}"
-      when: not dbversion_table_exists.changed
+      when: dbversion_table_exists.rc != 0
 
     - name: Check if version column exists in dbversion table
       become: yes
@@ -246,10 +253,10 @@
       become: yes
       become_user: postgres
       shell: |
-        psql -d "{{ zabbix_db_name }}" -c "ALTER TABLE zabbix.dbversion ADD COLUMN version INTEGER;"
+        psql -d "{{ zabbix_db_name }}" -c "ALTER TABLE zabbix.dbversion ADD COLUMN IF NOT EXISTS version INTEGER;"
         psql -d "{{ zabbix_db_name }}" -c "UPDATE zabbix.dbversion SET version = mandatory;"
         psql -d "{{ zabbix_db_name }}" -c "ALTER TABLE zabbix.dbversion ALTER COLUMN version SET NOT NULL;"
-      when: not version_column_exists.changed
+      when: version_column_exists.rc != 0
 
     - name: Check if Zabbix server config exists
       stat:
@@ -437,6 +444,66 @@
         - zabbix-agent
         - apache2
         - postgresql
+      ignore_errors: yes
+      register: services_started
+
+    - name: Wait for Apache to start
+      wait_for:
+        host: localhost
+        port: 80
+        timeout: 30
+      ignore_errors: yes
+      register: apache_port_check
+
+    - name: Check Apache service status
+      systemd:
+        name: apache2
+        state: started
+      register: apache_service_status
+
+    - name: Show Apache status
+      debug:
+        msg: |
+          Apache service: {{ apache_service_status.status }}
+          Apache port 80: {{ apache_port_check.state if apache_port_check is defined else 'unknown' }}
+
+    - name: Check Apache configuration syntax
+      command: apache2ctl configtest
+      register: apache_config_test
+      changed_when: false
+      ignore_errors: yes
+
+    - name: Show Apache config test result
+      debug:
+        msg: "Apache config test: {{ apache_config_test.stdout }}"
+
+    - name: Check Apache HTTP accessibility
+      uri:
+        url: "http://localhost/"
+        method: GET
+        status_code: 200,302,301
+      register: apache_http_check
+      ignore_errors: yes
+      delay: 5
+      retries: 3
+
+    - name: Show Apache HTTP check result
+      debug:
+        msg: "Apache HTTP check status: {{ apache_http_check.status }}"
+
+    - name: Verify Zabbix web interface accessibility
+      uri:
+        url: "http://localhost/setup.php"
+        method: GET
+        status_code: 200
+      register: zabbix_web_check
+      ignore_errors: yes
+      delay: 5
+      retries: 3
+
+    - name: Show Zabbix web interface status
+      debug:
+        msg: "Zabbix web interface status: {{ zabbix_web_check.status }}"
 
   handlers:
     - name: Restart Zabbix server
