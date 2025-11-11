@@ -220,9 +220,27 @@
   become_user: postgres
   shell: |
     psql -d "{{ zabbix_db_name }}" -t -c "SELECT 1 FROM information_schema.tables WHERE table_schema='zabbix' AND table_name='dbversion'" | grep -q 1
-  register: dbversion_table_exists
+  register: dbversion_table_exists_in_zabbix
   changed_when: false
   ignore_errors: yes
+
+- name: Check if dbversion table exists in public schema
+  become: yes
+  become_user: postgres
+  shell: |
+    psql -d "{{ zabbix_db_name }}" -t -c "SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='dbversion'" | grep -q 1
+  register: dbversion_table_exists_in_public
+  changed_when: false
+  ignore_errors: yes
+
+- name: Move dbversion table from public to zabbix schema if necessary
+  become: yes
+  become_user: postgres
+  shell: |
+    psql -d "{{ zabbix_db_name }}" -c "ALTER TABLE public.dbversion SET SCHEMA zabbix;"
+  when:
+    - dbversion_table_exists_in_public.rc == 0
+    - dbversion_table_exists_in_zabbix.rc != 0
 
 - name: Load Zabbix database schema into zabbix schema
   become: yes
@@ -231,7 +249,7 @@
     zcat /usr/share/zabbix-sql-scripts/postgresql/server.sql.gz | psql -d "{{ zabbix_db_name }}" -v schema=zabbix
   environment:
     PGPASSWORD: "{{ zabbix_db_password }}"
-  when: dbversion_table_exists.rc != 0
+  when: dbversion_table_exists_in_zabbix.rc != 0
 
 - name: Check if version column exists in dbversion table
   become: yes
@@ -247,7 +265,7 @@
   become_user: postgres
   shell: |
     psql -d "{{ zabbix_db_name }}" -c "ALTER TABLE zabbix.dbversion ADD COLUMN IF NOT EXISTS version INTEGER;"
-    psql -d "{{ zabbix_db_name }}" -c "UPDATE zabbix.dbversion SET version = mandatory;"
+    psql -d "{{ zabbix_db_name }}" -c "UPDATE zabbix.dbversion SET version = 1;"
     psql -d "{{ zabbix_db_name }}" -c "ALTER TABLE zabbix.dbversion ALTER COLUMN version SET NOT NULL;"
   when: version_column_exists.rc != 0
 
