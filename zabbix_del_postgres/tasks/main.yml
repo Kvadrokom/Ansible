@@ -1,38 +1,27 @@
 ---
----
-- name: Remove only Zabbix database
-  hosts: all
-  become: yes
-  vars:
-    zabbix_db_name: zabbix
-    zabbix_db_user: zabbix
+- name: Stop Zabbix server
+  systemd:
+    name: zabbix-server
+    state: stoppe
 
-  tasks:
-    - name: Stop Zabbix server
-      systemd:
-        name: zabbix-server
-        state: stopped
+- name: Drop Zabbix database
+  become_user: postgres
+  postgresql_db:
+    name: "{{ zabbix_db_name }}"
+    state: absent
 
-    - name: Drop Zabbix database
-      become: yes
-      become_user: postgres
-      postgresql_db:
-        name: "{{ zabbix_db_name }}"
-        state: absent
+- name: Remove Zabbix database user
+  become_user: postgres
+  postgresql_user:
+    name: "{{ zabbix_db_user }}"
+    state: absent
 
-    - name: Remove Zabbix database user
-      become: yes
-      become_user: postgres
-      postgresql_user:
-        name: "{{ zabbix_db_user }}"
-        state: absent
+- name: Remove Zabbix configuration
+  file:
+    path: /etc/zabbix/zabbix_server.conf
+    state: absent
 
-    - name: Remove Zabbix configuration
-      file:
-        path: /etc/zabbix/zabbix_server.conf
-        state: absent
-
-    - name: Show database removal status
-      debug:
-        msg: "Zabbix database and user have been removed"
+- name: Show database removal status
+  debug:
+    msg: "Zabbix database and user have been removed"
 # tasks file for zabbix_del_postgres
