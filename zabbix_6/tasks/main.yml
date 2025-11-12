@@ -285,6 +285,7 @@
     - { option: DBHost, value: localhost }
     - { option: DBName, value: "{{ zabbix_db_name }}" }
     - { option: DBUser, value: "{{ zabbix_db_user }}" }
+    - { option: DBSchema, value: "zabbix" }
     - { option: DBPassword, value: "{{ zabbix_db_password }}" }
     - { option: DBPort, value: "5432" }
     - { option: User, value: zabbix }
