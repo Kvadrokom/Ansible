@@ -1,2 +1,164 @@
 ---
+---
+- name: Complete Zabbix removal role
+  hosts: all
+  become: yes
+  vars:
+    zabbix_db_name: zabbix
+    zabbix_db_user: zabbix
+
+  tasks:
+    - name: Stop and disable Zabbix services
+      systemd:
+        name: "{{ item }}"
+        state: stopped
+        enabled: no
+        daemon_reload: yes
+      loop:
+        - zabbix-server
+        - zabbix-agent
+      ignore_errors: yes
+
+    - name: Stop and disable Apache if it was used for Zabbix
+      systemd:
+        name: apache2
+        state: stopped
+        enabled: no
+      when: "'zabbix-frontend-php' in ansible_facts.packages"
+      ignore_errors: yes
+
+    - name: Remove Zabbix packages
+      apt:
+        name: "{{ item }}"
+        state: absent
+        purge: yes
+        autoremove: yes
+      loop:
+        - zabbix-server-pgsql
+        - zabbix-frontend-php
+        - zabbix-apache-conf
+        - zabbix-agent
+        - zabbix-agent2
+        - zabbix-proxy-pgsql
+        - zabbix-sql-scripts
+        - zabbix-web-service
+      ignore_errors: yes
+
+    - name: Remove Zabbix database and user
+      become: yes
+      become_user: postgres
+      postgresql_db:
+        name: "{{ zabbix_db_name }}"
+        state: absent
+      ignore_errors: yes
+
+    - name: Remove Zabbix database user
+      become: yes
+      become_user: postgres
+      postgresql_user:
+        name: "{{ zabbix_db_user }}"
+        state: absent
+      ignore_errors: yes
+
+    - name: Remove Zabbix configuration directories
+      file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /etc/zabbix
+        - /var/lib/zabbix
+        - /var/log/zabbix
+        - /run/zabbix
+        - /usr/share/zabbix
+        - /usr/lib/zabbix
+
+    - name: Remove Zabbix user and group
+      user:
+        name: zabbix
+        state: absent
+        remove: yes
+      ignore_errors: yes
+
+    - name: Remove Zabbix cron jobs
+      file:
+        path: /etc/cron.d/zabbix
+        state: absent
+      ignore_errors: yes
+
+    - name: Remove Zabbix log files
+      file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /var/log/zabbix
+        - /var/log/apache2/zabbix_*.log
+      ignore_errors: yes
+
+    - name: Remove Zabbix Apache configuration
+      file:
+        path: /etc/apache2/sites-available/zabbix.conf
+        state: absent
+      ignore_errors: yes
+
+    - name: Remove Zabbix Apache site
+      file:
+        path: /etc/apache2/sites-enabled/zabbix.conf
+        state: absent
+      ignore_errors: yes
+
+    - name: Remove PHP configuration modifications for Zabbix
+      block:
+        - name: Restore original php.ini if backup exists
+          command: cp /etc/php/7.4/apache2/php.ini.bak /etc/php/7.4/apache2/php.ini
+          args:
+            creates: /etc/php/7.4/apache2/php.ini
+          ignore_errors: yes
+
+        - name: Remove PHP modules installed for Zabbix
+          apt:
+            name: "{{ item }}"
+            state: absent
+            purge: yes
+          loop:
+            - php7.4-pgsql
+            - php7.4-bcmath
+            - php7.4-mbstring
+            - php7.4-gd
+            - php7.4-xml
+            - php7.4-ldap
+            - php7.4-curl
+          ignore_errors: yes
+      when: "'zabbix-frontend-php' in ansible_facts.packages"
+      ignore_errors: yes
+
+    - name: Remove Zabbix temporary files
+      file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /tmp/zabbix*
+        - /var/tmp/zabbix*
+      ignore_errors: yes
+
+    - name: Clean up package cache
+      apt:
+        autoclean: yes
+        autoremove: yes
+
+    - name: Reload systemd
+      systemd:
+        daemon_reload: yes
+
+    - name: Verify Zabbix removal
+      shell: |
+        ! dpkg -l | grep -q zabbix && \
+        ! ps aux | grep -q zabbix && \
+        ! id zabbix &>/dev/null
+      register: removal_verification
+      failed_when: removal_verification.rc != 0
+      changed_when: false
+
+    - name: Show removal status
+      debug:
+        msg: "Zabbix has been completely removed from the system"
 # tasks file for zabbix_del_all
