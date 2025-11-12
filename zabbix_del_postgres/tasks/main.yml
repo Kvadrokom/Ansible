@@ -1,27 +1,40 @@
 ---
-- name: Stop Zabbix server
+- name: Stop Zabbix services to release database connections
   systemd:
-    name: zabbix-server
-    state: stoppe
+    name: "{{ item }}"
+    state: stopped
+    enabled: no
+  loop:
+    - zabbix-server
+    - zabbix-agent
+  ignore_errors: yes
+
+- name: Terminate all connections to Zabbix database
+  become_user: postgres
+  postgresql_query:
+    query: |
+      SELECT pg_terminate_backend(pid) 
+      FROM pg_stat_activity 
+      WHERE datname = '{{ zabbix_db_name }}' 
+        AND pid <> pg_backend_pid()
+  ignore_errors: yes
+  register: terminate_connections
+
+- name: Wait a moment for connections to close
+  pause:
+    seconds: 3
 
 - name: Drop Zabbix database
   become_user: postgres
   postgresql_db:
     name: "{{ zabbix_db_name }}"
     state: absent
+  ignore_errors: yes
 
 - name: Remove Zabbix database user
   become_user: postgres
   postgresql_user:
     name: "{{ zabbix_db_user }}"
     state: absent
-
-- name: Remove Zabbix configuration
-  file:
-    path: /etc/zabbix/zabbix_server.conf
-    state: absent
-
-- name: Show database removal status
-  debug:
-    msg: "Zabbix database and user have been removed"
+  ignore_errors: yes
 # tasks file for zabbix_del_postgres
