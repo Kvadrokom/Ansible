@@ -215,7 +215,32 @@
     psql -d "{{ zabbix_db_name }}" -c "ALTER DEFAULT PRIVILEGES IN SCHEMA zabbix GRANT ALL ON SEQUENCES TO {{ zabbix_db_user }};"
   when: zabbix_schema_exists.rc != 0
 
-- name: Check if dbversion table exists in zabbix schema
+- name: Check if any Zabbix tables exist (in any schema)
+  become: yes
+  become_user: postgres
+  shell: |
+    psql -d "{{ zabbix_db_name }}" -t -c "SELECT COUNT(*) FROM information_schema.tables WHERE table_name IN ('dbversion', 'hosts', 'items') AND table_schema IN ('public', 'zabbix')" | tr -d ' \n'
+  register: zabbix_tables_count
+  changed_when: false
+
+- name: Set search_path to use zabbix schema first
+  become: yes
+  become_user: postgres
+  shell: |
+    psql -d "{{ zabbix_db_name }}" -c "ALTER DATABASE {{ zabbix_db_name }} SET search_path TO zabbix, public;"
+  when: zabbix_tables_count.stdout == "0"
+
+- name: Load Zabbix database schema into zabbix schema
+  become: yes
+  become_user: postgres
+  shell: |
+    export PGOPTIONS="-c search_path=zabbix"
+    zcat /usr/share/zabbix-sql-scripts/postgresql/server.sql.gz | psql -d "{{ zabbix_db_name }}  -v schema=zabbix"
+  environment:
+    PGPASSWORD: "{{ zabbix_db_password }}"
+  when: zabbix_tables_count.stdout == "0"
+
+- name: Check if dbversion table exists in zabbix schema after installation
   become: yes
   become_user: postgres
   shell: |
@@ -224,7 +249,7 @@
   changed_when: false
   ignore_errors: yes
 
-- name: Check if dbversion table exists in public schema
+- name: Check if dbversion table exists in public schema (legacy)
   become: yes
   become_user: postgres
   shell: |
@@ -242,14 +267,19 @@
     - dbversion_table_exists_in_public.rc == 0
     - dbversion_table_exists_in_zabbix.rc != 0
 
-- name: Load Zabbix database schema into zabbix schema
+- name: Move all other Zabbix tables from public to zabbix schema
   become: yes
   become_user: postgres
   shell: |
-    zcat /usr/share/zabbix-sql-scripts/postgresql/server.sql.gz | psql -d "{{ zabbix_db_name }}" -v schema=zabbix
-  environment:
-    PGPASSWORD: "{{ zabbix_db_password }}"
-  when: dbversion_table_exists_in_zabbix.rc != 0
+    psql -d "{{ zabbix_db_name }}" -t -c "SELECT table_name FROM information_schema.tables WHERE table_schema='public' AND table_name LIKE 'history%' OR table_name LIKE 'trends%' OR table_name IN ('hosts', 'items', 'triggers', 'functions', 'graphs')" | while read table; do
+      if [ ! -z "$table" ]; then
+        psql -d "{{ zabbix_db_name }}" -c "ALTER TABLE public.\"$table\" SET SCHEMA zabbix;"
+      fi
+    done
+  when:
+    - dbversion_table_exists_in_public.rc == 0
+    - dbversion_table_exists_in_zabbix.rc != 0
+  ignore_errors: yes
 
 - name: Check if version column exists in dbversion table
   become: yes
@@ -265,7 +295,7 @@
   become_user: postgres
   shell: |
     psql -d "{{ zabbix_db_name }}" -c "ALTER TABLE zabbix.dbversion ADD COLUMN IF NOT EXISTS version INTEGER;"
-    psql -d "{{ zabbix_db_name }}" -c "UPDATE zabbix.dbversion SET version = 1;"
+    psql -d "{{ zabbix_db_name }}" -c "UPDATE zabbix.dbversion SET version = (SELECT mandatory FROM zabbix.dbversion LIMIT 1);"
     psql -d "{{ zabbix_db_name }}" -c "ALTER TABLE zabbix.dbversion ALTER COLUMN version SET NOT NULL;"
   when: version_column_exists.rc != 0
 
