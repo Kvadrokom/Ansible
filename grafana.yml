@@ -1,0 +1,5 @@
+- name: Deploy Zabbix 6 using role
+  hosts: monitor
+  become: true
+  roles:
+    - grafana
