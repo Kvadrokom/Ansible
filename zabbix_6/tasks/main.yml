@@ -235,7 +235,7 @@
   become_user: postgres
   shell: |
     export PGOPTIONS="-c search_path=zabbix"
-    zcat /usr/share/zabbix-sql-scripts/postgresql/server.sql.gz | psql -d "{{ zabbix_db_name }}  -v schema=zabbix"
+    zcat /usr/share/zabbix-sql-scripts/postgresql/server.sql.gz | psql -d "{{ zabbix_db_name }}"  -v schema=zabbix
   environment:
     PGPASSWORD: "{{ zabbix_db_password }}"
   when: zabbix_tables_count.stdout == "0"
