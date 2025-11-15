@@ -1,2 +1,32 @@
 ---
+# Grafana version
+grafana_version: "10.2.2"
+
+# Installation paths
+grafana_install_dir: "/usr/share/grafana"
+grafana_data_dir: "/var/lib/grafana"
+grafana_log_dir: "/var/log/grafana"
+
+# Service configuration
+grafana_service_user: "grafana"
+grafana_service_group: "grafana"
+
+# Network configuration
+grafana_http_port: 3000
+grafana_http_addr: "0.0.0.0"
+
+# Admin user (change in production!)
+grafana_admin_user: "admin"
+grafana_admin_password: "Rem4825788"
+
+# Security
+grafana_secret_key: "rqvibAsO9b1aS2gQLtwKar2Ct0Uo8OFDydeuayanmxBS81__brZlDjCCFK6Z1eQXQpWsdv2GusKjTSzsaeq7jw"
+
+# Repository configuration
+grafana_repository_url: "https://packages.grafana.com/oss/deb"
+grafana_gpg_key: "https://packages.grafana.com/gpg.key"
+
+# Service state
+grafana_service_state: started
+grafana_service_enabled: true
 # defaults file for grafana

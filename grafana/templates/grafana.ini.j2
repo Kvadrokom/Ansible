@@ -1,0 +1,41 @@
+# Grafana main configuration file
+[server]
+protocol = http
+http_addr = {{ grafana_http_addr }}
+http_port = {{ grafana_http_port }}
+domain = {{ ansible_default_ipv4.address | default(ansible_all_ipv4_addresses[0]) }}
+root_url = http://{{ ansible_default_ipv4.address | default(ansible_all_ipv4_addresses[0]) }}:{{ grafana_http_port }}/
+enable_gzip = true
+
+[database]
+type = sqlite3
+path = {{ grafana_data_dir }}/grafana.db
+
+[session]
+provider = file
+provider_config = {{ grafana_data_dir }}/sessions
+
+[security]
+admin_user = {{ grafana_admin_user }}
+admin_password = {{ grafana_admin_password }}
+secret_key = {{ grafana_secret_key }}
+
+[users]
+allow_sign_up = false
+allow_org_create = false
+auto_assign_org = true
+auto_assign_org_role = Viewer
+
+[auth.anonymous]
+enabled = false
+
+[log]
+mode = file
+level = info
+logs_path = {{ grafana_log_dir }}
+
+[paths]
+data = {{ grafana_data_dir }}
+logs = {{ grafana_log_dir }}
+plugins = {{ grafana_install_dir }}/data/plugins
+provisioning = {{ grafana_install_dir }}/conf/provisioning

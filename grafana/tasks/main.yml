@@ -1,2 +1,104 @@
 ---
+- name: Include OS-specific variables
+  include_vars: "{{ item }}"
+  loop:
+    - "{{ ansible_distribution | lower }}_{{ ansible_distribution_major_version | lower }}.yml"
+    - "{{ ansible_os_family | lower }}_{{ ansible_distribution_major_version | lower }}.yml"
+  ignore_errors: yes
+
+- name: Update apt package cache
+  apt:
+    update_cache: yes
+    cache_valid_time: 3600
+  tags: [packages, repository]
+
+- name: Install required system packages
+  apt:
+    name:
+      - apt-transport-https
+      - software-properties-common
+      - wget
+      - gnupg
+    state: present
+    update_cache: yes
+  tags: [packages, dependencies]
+
+- name: Add Grafana GPG key
+  apt_key:
+    url: "{{ grafana_gpg_key }}"
+    state: present
+  tags: [repository]
+
+- name: Add Grafana repository
+  apt_repository:
+    repo: "deb {{ grafana_repository_url }} stable main"
+    state: present
+    filename: grafana
+    update_cache: yes
+  tags: [repository]
+
+- name: Install Grafana
+  apt:
+    name: "{{ grafana_package_name }}={{ grafana_version }}"
+    state: present
+    force: yes
+    update_cache: yes
+  tags: [grafana, packages]
+
+- name: Create Grafana directories
+  file:
+    path: "{{ item.path | default(item) }}"
+    state: directory
+    owner: "{{ grafana_service_user }}"
+    group: "{{ grafana_service_group }}"
+    mode: "{{ item.mode | default('0755') }}"
+    recurse: "{{ item.recurse | default(no) }}"
+  loop:
+    - path: "{{ grafana_data_dir }}"
+    - path: "{{ grafana_log_dir }}"
+    - path: "{{ grafana_install_dir }}/data"
+    - path: "{{ grafana_install_dir }}/conf"
+      recurse: yes
+  tags: [configuration, directories]
+
+- name: Deploy Grafana configuration
+  template:
+    src: grafana.ini.j2
+    dest: "{{ grafana_install_dir }}/conf/grafana.ini"
+    owner: "{{ grafana_service_user }}"
+    group: "{{ grafana_service_group }}"
+    mode: '0640'
+    backup: yes
+  notify: restart grafana
+  tags: [configuration]
+
+- name: Ensure Grafana service is enabled and started
+  systemd:
+    name: "{{ grafana_service_name }}"
+    state: "{{ grafana_service_state }}"
+    enabled: "{{ grafana_service_enabled }}"
+    daemon_reload: yes
+  tags: [service]
+
+- name: Wait for Grafana to start
+  wait_for:
+    port: "{{ grafana_http_port }}"
+    host: "{{ grafana_http_addr }}"
+    delay: 10
+    timeout: 60
+  when: grafana_service_state == "started"
+  tags: [service, verification]
+
+- name: Verify Grafana service health
+  uri:
+    url: "http://localhost:{{ grafana_http_port }}/api/health"
+    method: GET
+    status_code: 200
+    timeout: 30
+  register: grafana_health
+  until: grafana_health.status == 200
+  retries: 10
+  delay: 5
+  when: grafana_service_state == "started"
+  tags: [verification, health-check]
 # tasks file for grafana

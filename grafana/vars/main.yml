@@ -1,2 +1,5 @@
 ---
+# Fixed variables that shouldn't be overridden
+grafana_package_name: "grafana"
+grafana_service_name: "grafana-server"
 # vars file for grafana
