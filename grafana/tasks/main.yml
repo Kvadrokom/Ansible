@@ -1,15 +1,53 @@
 ---
+- name: Check if tunnel is already running
+  ansible.builtin.shell:
+    cmd: "ss -tln | grep ':1080'"
+  register: tunnel_check
+  ignore_errors: yes
+  changed_when: false
+  tags: [tunnel]
+
+- name: Start SSH tunnel on target host
+  ansible.builtin.shell:
+    cmd: |
+      ssh -f -N -D 1080 {{ tunnel_user }}@{{ tunnel_host }} \
+      -o StrictHostKeyChecking=no \
+      -o BatchMode=yes \
+      -o ConnectTimeout=30 \
+      -o ServerAliveInterval=60 \
+      -o ExitOnForwardFailure=yes
+  when: tunnel_check.rc != 0
+  changed_when: false
+  tags: [tunnel]
+
+- name: Wait for tunnel to be ready
+  ansible.builtin.wait_for:
+    port: 1080
+    host: 127.0.0.1
+    timeout: 10
+  tags: [tunnel]
+
+- name: Test tunnel connection
+  ansible.builtin.shell:
+    cmd: "curl --socks5 127.0.0.1:1080 -I https://packages.grafana.com/"
+  register: tunnel_test
+  changed_when: false
+  tags: [tunnel]
+
 - name: Include OS-specific variables
   include_vars: "{{ item }}"
   loop:
     - "{{ ansible_distribution | lower }}_{{ ansible_distribution_major_version | lower }}.yml"
     - "{{ ansible_os_family | lower }}_{{ ansible_distribution_major_version | lower }}.yml"
   ignore_errors: yes
+  tags: [repository]
 
-- name: Update apt package cache
+- name: Update apt package cache through tunnel
   apt:
     update_cache: yes
     cache_valid_time: 3600
+  environment:
+    https_proxy: "socks5://127.0.0.1:1080"
   tags: [packages, repository]
 
 - name: Install required system packages
@@ -21,22 +59,9 @@
       - gnupg
     state: present
     update_cache: yes
+  environment:
+    https_proxy: "socks5://127.0.0.1:1080"
   tags: [packages, dependencies]
-
-- name: Ensure SSH tunnel is running
-  ansible.builtin.shell:
-    cmd: |
-      # Проверяем, не запущен ли уже туннель
-      if ! ss -tln | grep -q ':1080'; then
-        ssh -f -N -D 1080 {{ tunnel_user }}@{{ tunnel_host }} \
-          -o StrictHostKeyChecking=no \
-          -o BatchMode=yes \
-          -o ConnectTimeout=30
-      fi
-  delegate_to: localhost
-  become: no
-  changed_when: false
-  tags: [tunnel]
 
 - name: Add Grafana GPG key through tunnel
   apt_key:
@@ -55,6 +80,12 @@
   environment:
     https_proxy: "socks5://127.0.0.1:1080"
   tags: [repository]
+
+- name: Stop SSH tunnel after setup
+  ansible.builtin.shell:
+    cmd: "pkill -f 'ssh.*1080.*{{ tunnel_host }}'"
+  changed_when: false
+  tags: [tunnel]
 
 - name: Install Grafana
   apt:
