@@ -1,38 +1,47 @@
 ---
-- name: Check if tunnel is already running
+- name: Check if Grafana is already installed
   ansible.builtin.shell:
-    cmd: "ss -tln | grep ':1080'"
-  register: tunnel_check
-  ignore_errors: yes
+    cmd: "dpkg -l grafana | grep -q '^ii' && echo 'installed' || echo 'not_installed'"
+  register: grafana_installed
   changed_when: false
-  tags: [tunnel]
+  tags: [grafana]
 
-- name: Start SSH tunnel on target host
-  ansible.builtin.shell:
-    cmd: |
-      ssh -f -N -D 1080 {{ tunnel_user }}@{{ tunnel_host }} \
-      -o StrictHostKeyChecking=no \
-      -o BatchMode=yes \
-      -o ConnectTimeout=30 \
-      -o ServerAliveInterval=60 \
-      -o ExitOnForwardFailure=yes
-  when: tunnel_check.rc != 0
-  changed_when: false
-  tags: [tunnel]
+- name: Download Grafana files via Control Node
+  block:
+    - name: Check if files already exist on control node
+      ansible.builtin.stat:
+        path: "/tmp/grafana.deb"
+      register: grafana_deb_file
+      delegate_to: "185.114.72.54"
+    
+    - name: Download Grafana package via Control Node
+      ansible.builtin.get_url:
+        url: "https://dl.grafana.com/oss/release/grafana_{{ grafana_version }}_amd64.deb"
+        dest: "/tmp/grafana.deb"
+      delegate_to: "185.114.72.54"
+      become: no
+      when: not grafana_deb_file.stat.exists
+      tags: [download]
 
-- name: Wait for tunnel to be ready
-  ansible.builtin.wait_for:
-    port: 1080
-    host: 127.0.0.1
-    timeout: 10
-  tags: [tunnel]
+    - name: Download Grafana GPG key via Control Node
+      ansible.builtin.get_url:
+        url: "https://packages.grafana.com/gpg.key"
+        dest: "/tmp/grafana-gpg.key"
+      delegate_to: "185.114.72.54"
+      become: no
+      when: not grafana_deb_file.stat.exists
+      tags: [download]
 
-- name: Test tunnel connection
-  ansible.builtin.shell:
-    cmd: "curl --socks5 127.0.0.1:1080 -I https://packages.grafana.com/"
-  register: tunnel_test
-  changed_when: false
-  tags: [tunnel]
+    - name: Copy files to target host
+      ansible.builtin.copy:
+        src: "{{ item.src }}"
+        dest: "{{ item.dest }}"
+      loop:
+        - { src: "/tmp/grafana-gpg.key", dest: "/tmp/grafana-gpg.key" }
+        - { src: "/tmp/grafana.deb", dest: "/tmp/grafana.deb" }
+      when: not grafana_deb_file.stat.exists
+      tags: [download]
+  when: grafana_installed.stdout != "installed"
 
 - name: Include OS-specific variables
   include_vars: "{{ item }}"
@@ -42,12 +51,10 @@
   ignore_errors: yes
   tags: [repository]
 
-- name: Update apt package cache through tunnel
+- name: Update apt package cache (local)
   apt:
     update_cache: yes
     cache_valid_time: 3600
-  environment:
-    https_proxy: "socks5://127.0.0.1:1080"
   tags: [packages, repository]
 
 - name: Install required system packages
@@ -59,40 +66,44 @@
       - gnupg
     state: present
     update_cache: yes
-  environment:
-    https_proxy: "socks5://127.0.0.1:1080"
   tags: [packages, dependencies]
 
-- name: Add Grafana GPG key through tunnel
+- name: Add Grafana GPG key from local file
   apt_key:
-    url: "https://packages.grafana.com/gpg.key"
+    file: "/tmp/grafana-gpg.key"
     state: present
-  environment:
-    https_proxy: "socks5://127.0.0.1:1080"
+  when: grafana_installed.stdout != "installed"
   tags: [repository]
 
-- name: Add Grafana repository through tunnel
-  apt_repository:
-    repo: "deb https://packages.grafana.com/oss/deb stable main"
-    state: present
-    filename: grafana
-    update_cache: yes
-  environment:
-    https_proxy: "socks5://127.0.0.1:1080"
-  tags: [repository]
+- name: Install Grafana from local package
+  block:
+    - name: Install dependencies for Grafana
+      apt:
+        name:
+          - adduser
+          - libfontconfig1
+        state: present
 
-- name: Stop SSH tunnel after setup
-  ansible.builtin.shell:
-    cmd: "pkill -f 'ssh.*1080.*{{ tunnel_host }}'"
-  changed_when: false
-  tags: [tunnel]
+    - name: Check if Grafana package is already installed
+      ansible.builtin.dpkg:
+        path: /tmp/grafana.deb
+        state: queried
+      register: grafana_package_check
+      ignore_errors: yes
+      changed_when: false
 
-- name: Install Grafana
-  apt:
-    name: "{{ grafana_package_name }}={{ grafana_version }}"
-    state: present
-    force: yes
-    update_cache: yes
+    - name: Install Grafana package
+      ansible.builtin.dpkg:
+        path: /tmp/grafana.deb
+        state: present
+      when: grafana_package_check is not defined or grafana_package_check.rc != 0
+
+    - name: Ensure Grafana package is properly configured
+      ansible.builtin.shell:
+        cmd: "dpkg --configure -a"
+      when: grafana_package_check is defined and grafana_package_check.rc == 0
+      changed_when: false
+  when: grafana_installed.stdout != "installed"
   tags: [grafana, packages]
 
 - name: Create Grafana directories
@@ -151,4 +162,13 @@
   delay: 5
   when: grafana_service_state == "started"
   tags: [verification, health-check]
-# tasks file for grafana
+
+- name: Cleanup temporary files
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - "/tmp/grafana-gpg.key"
+    - "/tmp/grafana.deb"
+  when: grafana_installed.stdout == "installed"
+  tags: [cleanup]
