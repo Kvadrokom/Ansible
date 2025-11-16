@@ -1,161 +1,23 @@
----
-- name: Check if Grafana is already installed
-  ansible.builtin.shell:
-    cmd: "dpkg -l grafana | grep -q '^ii' && echo 'installed' || echo 'not_installed'"
-  register: grafana_installed
-  changed_when: false
-  tags: [grafana]
-
-- name: Download Grafana files via telebot host
+- name: Copy files from telebot host to target host using fetch+copy
   block:
-    - name: Check if files already exist on telebot host
-      ansible.builtin.stat:
-        path: "/tmp/grafana.deb"
-      register: grafana_deb_file
-      delegate_to: telebot
-      become: no
-    
-    - name: Download Grafana package via telebot host
-      ansible.builtin.get_url:
-        url: "https://dl.grafana.com/oss/release/grafana_{{ grafana_version }}_amd64.deb"
-        dest: "/tmp/grafana.deb"
-      delegate_to: telebot
-      become: no
-      when: not grafana_deb_file.stat.exists
-      tags: [download]
-
-    - name: Download Grafana GPG key via telebot host
-      ansible.builtin.get_url:
-        url: "https://packages.grafana.com/gpg.key"
-        dest: "/tmp/grafana-gpg.key"
-      delegate_to: telebot
-      become: no
-      when: not grafana_deb_file.stat.exists
-      tags: [download]
-
-    - name: Copy files from telebot host to target host
-      ansible.builtin.copy:
+    - name: Fetch files from telebot host to control node
+      ansible.builtin.fetch:
         src: "{{ item.src }}"
+        dest: "/tmp/fetched-{{ item.name }}"
+        flat: yes
+      delegate_to: telebot
+      loop:
+        - { src: "/tmp/grafana-gpg.key", name: "grafana-gpg.key" }
+        - { src: "/tmp/grafana.deb", name: "grafana.deb" }
+      when: not grafana_deb_file.stat.exists
+      tags: [download]
+
+    - name: Copy files from control node to target host
+      ansible.builtin.copy:
+        src: "/tmp/fetched-{{ item.name }}"
         dest: "{{ item.dest }}"
       loop:
-        - { src: "/tmp/grafana-gpg.key", dest: "/tmp/grafana-gpg.key" }
-        - { src: "/tmp/grafana.deb", dest: "/tmp/grafana.deb" }
+        - { name: "grafana-gpg.key", dest: "/tmp/grafana-gpg.key" }
+        - { name: "grafana.deb", dest: "/tmp/grafana.deb" }
       when: not grafana_deb_file.stat.exists
       tags: [download]
-  when: grafana_installed.stdout != "installed"
-
-- name: Include OS-specific variables
-  include_vars: "{{ item }}"
-  loop:
-    - "{{ ansible_distribution | lower }}_{{ ansible_distribution_major_version | lower }}.yml"
-    - "{{ ansible_os_family | lower }}_{{ ansible_distribution_major_version | lower }}.yml"
-  ignore_errors: yes
-  tags: [repository]
-
-- name: Update apt package cache (local)
-  apt:
-    update_cache: yes
-    cache_valid_time: 3600
-  tags: [packages, repository]
-
-- name: Install required system packages
-  apt:
-    name:
-      - apt-transport-https
-      - software-properties-common
-      - wget
-      - gnupg
-    state: present
-    update_cache: yes
-  tags: [packages, dependencies]
-
-- name: Add Grafana GPG key from local file
-  apt_key:
-    file: "/tmp/grafana-gpg.key"
-    state: present
-  when: grafana_installed.stdout != "installed"
-  tags: [repository]
-
-- name: Install Grafana from local package
-  block:
-    - name: Install dependencies for Grafana
-      apt:
-        name:
-          - adduser
-          - libfontconfig1
-        state: present
-
-    - name: Install Grafana package using apt (local file)
-      ansible.builtin.apt:
-        deb: "/tmp/grafana.deb"
-        state: present
-
-  when: grafana_installed.stdout != "installed"
-  tags: [grafana, packages]
-
-- name: Create Grafana directories
-  file:
-    path: "{{ item.path | default(item) }}"
-    state: directory
-    owner: "{{ grafana_service_user }}"
-    group: "{{ grafana_service_group }}"
-    mode: "{{ item.mode | default('0755') }}"
-    recurse: "{{ item.recurse | default(no) }}"
-  loop:
-    - path: "{{ grafana_data_dir }}"
-    - path: "{{ grafana_log_dir }}"
-    - path: "{{ grafana_install_dir }}/data"
-    - path: "{{ grafana_install_dir }}/conf"
-      recurse: yes
-  tags: [configuration, directories]
-
-- name: Deploy Grafana configuration
-  template:
-    src: grafana.ini.j2
-    dest: "{{ grafana_install_dir }}/conf/grafana.ini"
-    owner: "{{ grafana_service_user }}"
-    group: "{{ grafana_service_group }}"
-    mode: '0640'
-    backup: yes
-  notify: restart grafana
-  tags: [configuration]
-
-- name: Ensure Grafana service is enabled and started
-  systemd:
-    name: "{{ grafana_service_name }}"
-    state: "{{ grafana_service_state }}"
-    enabled: "{{ grafana_service_enabled }}"
-    daemon_reload: yes
-  tags: [service]
-
-- name: Wait for Grafana to start
-  wait_for:
-    port: "{{ grafana_http_port }}"
-    host: "{{ grafana_http_addr }}"
-    delay: 10
-    timeout: 60
-  when: grafana_service_state == "started"
-  tags: [service, verification]
-
-- name: Verify Grafana service health
-  uri:
-    url: "http://localhost:{{ grafana_http_port }}/api/health"
-    method: GET
-    status_code: 200
-    timeout: 30
-  register: grafana_health
-  until: grafana_health.status == 200
-  retries: 10
-  delay: 5
-  when: grafana_service_state == "started"
-  tags: [verification, health-check]
-
-- name: Cleanup temporary files
-  ansible.builtin.file:
-    path: "{{ item }}"
-    state: absent
-  loop:
-    - "/tmp/grafana-gpg.key"
-    - "/tmp/grafana.deb"
-  when: grafana_installed.stdout == "installed"
-  tags: [cleanup]
