@@ -12,14 +12,14 @@
       ansible.builtin.stat:
         path: "/tmp/grafana.deb"
       register: grafana_deb_file
-      delegate_to: telebot_host
+      delegate_to: telebot
       become: no
     
     - name: Download Grafana package via telebot host
       ansible.builtin.get_url:
         url: "https://dl.grafana.com/oss/release/grafana_{{ grafana_version }}_amd64.deb"
         dest: "/tmp/grafana.deb"
-      delegate_to: telebot_host
+      delegate_to: telebot
       become: no
       when: not grafana_deb_file.stat.exists
       tags: [download]
@@ -28,7 +28,7 @@
       ansible.builtin.get_url:
         url: "https://packages.grafana.com/gpg.key"
         dest: "/tmp/grafana-gpg.key"
-      delegate_to: telebot_host
+      delegate_to: telebot
       become: no
       when: not grafana_deb_file.stat.exists
       tags: [download]
