@@ -22,16 +22,23 @@
     state: present
     update_cache: yes
   tags: [packages, dependencies]
-  
-- name: Start SSH tunnel
+
+- name: Ensure SSH tunnel is running
   ansible.builtin.shell:
-    cmd: "ssh -f -N -D 1080 {{ tunnel_user }}@{{ tunnel_host }} -o StrictHostKeyChecking=no"
-    creates: "/tmp/grafana_tunnel.pid"
+    cmd: |
+      # Проверяем, не запущен ли уже туннель
+      if ! ss -tln | grep -q ':1080'; then
+        ssh -f -N -D 1080 {{ tunnel_user }}@{{ tunnel_host }} \
+          -o StrictHostKeyChecking=no \
+          -o BatchMode=yes \
+          -o ConnectTimeout=30
+      fi
   delegate_to: localhost
+  become: no
   changed_when: false
   tags: [tunnel]
 
-- name: Add Grafana GPG key
+- name: Add Grafana GPG key through tunnel
   apt_key:
     url: "https://packages.grafana.com/gpg.key"
     state: present
@@ -39,7 +46,7 @@
     https_proxy: "socks5://127.0.0.1:1080"
   tags: [repository]
 
-- name: Add Grafana repository
+- name: Add Grafana repository through tunnel
   apt_repository:
     repo: "deb https://packages.grafana.com/oss/deb stable main"
     state: present
@@ -48,13 +55,6 @@
   environment:
     https_proxy: "socks5://127.0.0.1:1080"
   tags: [repository]
-
-- name: Stop SSH tunnel
-  ansible.builtin.shell:
-    cmd: "pkill -f 'ssh.*1080'"
-  delegate_to: localhost
-  changed_when: false
-  tags: [tunnel]
 
 - name: Install Grafana
   apt:
