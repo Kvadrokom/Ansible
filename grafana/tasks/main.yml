@@ -84,25 +84,25 @@
           - libfontconfig1
         state: present
 
-    - name: Check if Grafana package is already installed
-      ansible.builtin.dpkg:
-        path: /tmp/grafana.deb
-        state: queried
-      register: grafana_package_check
-      ignore_errors: yes
-      changed_when: false
-
-    - name: Install Grafana package
-      ansible.builtin.dpkg:
-        path: /tmp/grafana.deb
-        state: present
-      when: grafana_package_check is not defined or grafana_package_check.rc != 0
-
-    - name: Ensure Grafana package is properly configured
+    - name: Check if Grafana package is already installed (shell method)
       ansible.builtin.shell:
-        cmd: "dpkg --configure -a"
-      when: grafana_package_check is defined and grafana_package_check.rc == 0
+        cmd: "dpkg -l grafana | grep -q '^ii' && echo 'installed' || echo 'not_installed'"
+      register: grafana_package_check
       changed_when: false
+
+    - name: Install Grafana package using dpkg command
+      ansible.builtin.shell:
+        cmd: "dpkg -i /tmp/grafana.deb"
+      when: grafana_package_check.stdout == "not_installed"
+      args:
+        warn: false  # Отключаем предупреждения о использовании shell
+
+    - name: Fix any broken dependencies
+      ansible.builtin.apt:
+        name: grafana
+        state: present
+      when: grafana_package_check.stdout == "installed"
+
   when: grafana_installed.stdout != "installed"
   tags: [grafana, packages]
 
