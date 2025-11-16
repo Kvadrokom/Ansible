@@ -6,16 +6,16 @@
   changed_when: false
   tags: [grafana]
 
-- name: Download Grafana files via Control Node
+- name: Download Grafana files via telebot host
   block:
-    - name: Check if files already exist on control node
+    - name: Check if files already exist on telebot host
       ansible.builtin.stat:
         path: "/tmp/grafana.deb"
       register: grafana_deb_file
-      become: no
       delegate_to: telebot_host
+      become: no
     
-    - name: Download Grafana package via Control Node
+    - name: Download Grafana package via telebot host
       ansible.builtin.get_url:
         url: "https://dl.grafana.com/oss/release/grafana_{{ grafana_version }}_amd64.deb"
         dest: "/tmp/grafana.deb"
@@ -24,7 +24,7 @@
       when: not grafana_deb_file.stat.exists
       tags: [download]
 
-    - name: Download Grafana GPG key via Control Node
+    - name: Download Grafana GPG key via telebot host
       ansible.builtin.get_url:
         url: "https://packages.grafana.com/gpg.key"
         dest: "/tmp/grafana-gpg.key"
@@ -33,7 +33,7 @@
       when: not grafana_deb_file.stat.exists
       tags: [download]
 
-    - name: Copy files to target host
+    - name: Copy files from telebot host to target host
       ansible.builtin.copy:
         src: "{{ item.src }}"
         dest: "{{ item.dest }}"
@@ -85,24 +85,10 @@
           - libfontconfig1
         state: present
 
-    - name: Check if Grafana package is already installed (shell method)
-      ansible.builtin.shell:
-        cmd: "dpkg -l grafana | grep -q '^ii' && echo 'installed' || echo 'not_installed'"
-      register: grafana_package_check
-      changed_when: false
-
-    - name: Install Grafana package using dpkg command
-      ansible.builtin.shell:
-        cmd: "dpkg -i /tmp/grafana.deb"
-      when: grafana_package_check.stdout == "not_installed"
-      args:
-        warn: false  # Отключаем предупреждения о использовании shell
-
-    - name: Fix any broken dependencies
+    - name: Install Grafana package using apt (local file)
       ansible.builtin.apt:
-        name: grafana
+        deb: "/tmp/grafana.deb"
         state: present
-      when: grafana_package_check.stdout == "installed"
 
   when: grafana_installed.stdout != "installed"
   tags: [grafana, packages]
