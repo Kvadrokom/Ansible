@@ -22,8 +22,7 @@
     state: present
     update_cache: yes
   tags: [packages, dependencies]
-
----
+  
 - name: Start SSH tunnel
   ansible.builtin.shell:
     cmd: "ssh -f -N -D 1080 {{ tunnel_user }}@{{ tunnel_host }} -o StrictHostKeyChecking=no"
