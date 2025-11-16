@@ -2,4 +2,6 @@
 # Fixed variables that shouldn't be overridden
 grafana_package_name: "grafana"
 grafana_service_name: "grafana-server"
+tunnel_user: "rem"
+tunnel_host: "185.114.72.54"
 # vars file for grafana
