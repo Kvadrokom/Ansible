@@ -279,7 +279,7 @@
 
 - name: Install Zabbix plugin for Grafana
   command:
-    cmd: "grafana-cli plugins install alexanderzobnin-zabbix-app"
+    cmd: "grafana-cli plugins install alexanderzobnin-zabbix-app 4.5.3"
   become: yes
   tags: [zabbix]
 
