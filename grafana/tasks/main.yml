@@ -40,7 +40,9 @@
       ansible.builtin.get_url:
         url: "https://packages.grafana.com/gpg.key"
         dest: "/tmp/grafana-gpg.key"
-        proxy: "http://localhost:1080"
+      environment:
+        https_proxy: "http://localhost:1080"
+        http_proxy: "http://localhost:1080"
       delegate_to: localhost
       become: no
       when: not grafana_gpg_file_ansible.stat.exists
