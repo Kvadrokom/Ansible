@@ -4,4 +4,11 @@ grafana_package_name: "grafana"
 grafana_service_name: "grafana-server"
 tunnel_user: "rem"
 tunnel_host: "185.114.72.54"
+grafana_service_user: "grafana"
+grafana_service_group: "grafana"
+grafana_data_dir: "/var/lib/grafana"
+grafana_log_dir: "/var/log/grafana"
+grafana_install_dir: "/usr/share/grafana"
+
+# Назначение: пользователь и группа, от имени которых работает служба Grafana
 # vars file for grafana
