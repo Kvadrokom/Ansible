@@ -277,20 +277,22 @@
   tags: [cleanup]
 
 
-- name: Add basic Zabbix datasource
-  uri:
-    url: "http://localhost:{{ grafana_http_port }}/api/datasources"
-    method: POST
-    body:
-      name: "Zabbix"
-      type: "alexanderzobnin-zabbix-datasource"
-      access: "proxy"
-    body_format: json
-    status_code: 200
-    headers:
-      Content-Type: "application/json"
-    url_username: "{{ grafana_admin_user | default('admin') }}"
-    url_password: "{{ grafana_admin_password | default('admin') }}"
-  register: zabbix_datasource
-  changed_when: zabbix_datasource.status == 200
+- name: Install Zabbix plugin for Grafana
+  command:
+    cmd: "grafana-cli plugins install alexanderzobnin-zabbix-app"
+  become: yes
+  tags: [zabbix]
+
+- name: Restart Grafana after plugin installation
+  systemd:
+    name: "{{ grafana_service_name }}"
+    state: restarted
+  tags: [zabbix]
+
+- name: Wait for Grafana to start
+  wait_for:
+    port: "{{ grafana_http_port }}"
+    host: "{{ grafana_http_addr }}"
+    delay: 10
+    timeout: 60
   tags: [zabbix]
