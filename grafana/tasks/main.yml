@@ -277,16 +277,14 @@
   tags: [cleanup]
 
 
-- name: Add empty Zabbix datasource to Grafana
+- name: Add basic Zabbix datasource
   uri:
     url: "http://localhost:{{ grafana_http_port }}/api/datasources"
     method: POST
     body:
       name: "Zabbix"
       type: "alexanderzobnin-zabbix-datasource"
-      url: ""  # Пустой URL - заполнишь вручную
       access: "proxy"
-      isDefault: false
     body_format: json
     status_code: 200
     headers:
