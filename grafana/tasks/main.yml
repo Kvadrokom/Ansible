@@ -21,40 +21,66 @@
   become: no
   tags: [download]
 
-- name: Start SSH tunnel from Ansible Host to telebot for internet access
+- name: Check if SOCKS tunnel is already running
+  ansible.builtin.shell:
+    cmd: "ss -tln | grep ':1080' || exit 1"
+  delegate_to: localhost
+  become: no
+  register: socks_tunnel_check
+  ignore_errors: yes
+  changed_when: false
+  tags: [tunnel]
+
+- name: Start SOCKS tunnel from Ansible Host to telebot for internet access
   ansible.builtin.shell:
     cmd: |
-      ssh -f -N -L 1080:packages.grafana.com:443 {{ hostvars['telebot']['ansible_host'] }} \
+      ssh -f -N -D 1080 {{ hostvars['telebot']['ansible_host'] }} \
       -o StrictHostKeyChecking=no \
       -o BatchMode=yes \
       -o ConnectTimeout=30
   delegate_to: localhost
   become: no
-  when: grafana_installed.stdout != "installed" and (not grafana_deb_file_ansible.stat.exists or not grafana_gpg_file_ansible.stat.exists)
+  when: >
+    grafana_installed.stdout != "installed" and 
+    (not grafana_deb_file_ansible.stat.exists or not grafana_gpg_file_ansible.stat.exists) and
+    socks_tunnel_check.rc != 0
   changed_when: false
   tags: [tunnel]
 
-- name: Download Grafana files to Ansible Host via tunnel
+- name: Wait for tunnel to be ready
+  ansible.builtin.wait_for:
+    port: 1080
+    host: 127.0.0.1
+    timeout: 10
+  delegate_to: localhost
+  when: >
+    grafana_installed.stdout != "installed" and 
+    (not grafana_deb_file_ansible.stat.exists or not grafana_gpg_file_ansible.stat.exists)
+  tags: [tunnel]
+
+- name: Download Grafana files to Ansible Host via SOCKS tunnel
   block:
-    - name: Download Grafana GPG key to Ansible Host via tunnel
+    - name: Download Grafana GPG key to Ansible Host via SOCKS
       ansible.builtin.get_url:
         url: "https://packages.grafana.com/gpg.key"
         dest: "/tmp/grafana-gpg.key"
-      environment:
-        https_proxy: "http://localhost:1080"
-        http_proxy: "http://localhost:1080"
       delegate_to: localhost
       become: no
+      environment:
+        https_proxy: "socks5://localhost:1080"
+        http_proxy: "socks5://localhost:1080"
       when: not grafana_gpg_file_ansible.stat.exists
       tags: [download]
 
-    - name: Download Grafana package to Ansible Host via tunnel
+    - name: Download Grafana package to Ansible Host via SOCKS
       ansible.builtin.get_url:
         url: "https://dl.grafana.com/oss/release/grafana_{{ grafana_version }}_amd64.deb"
         dest: "/tmp/grafana.deb"
-        proxy: "http://localhost:1080"
       delegate_to: localhost
       become: no
+      environment:
+        https_proxy: "socks5://localhost:1080"
+        http_proxy: "socks5://localhost:1080"
       when: not grafana_deb_file_ansible.stat.exists
       tags: [download]
 
@@ -68,20 +94,27 @@
       delegate_to: localhost
       become: no
       register: file_verify_ansible
+      changed_when: false
       tags: [download]
 
     - name: Debug Ansible Host files
       ansible.builtin.debug:
         var: file_verify_ansible.stdout
       tags: [download]
-  when: grafana_installed.stdout != "installed" and (not grafana_deb_file_ansible.stat.exists or not grafana_gpg_file_ansible.stat.exists)
+  when: >
+    grafana_installed.stdout != "installed" and 
+    (not grafana_deb_file_ansible.stat.exists or not grafana_gpg_file_ansible.stat.exists)
 
-- name: Stop SSH tunnel
+- name: Stop SSH tunnel (only if we started it)
   ansible.builtin.shell:
-    cmd: "pkill -f 'ssh.*1080.*packages.grafana.com'"
+    cmd: "pkill -f 'ssh.*1080.*{{ hostvars['telebot']['ansible_host'] }}'"
   delegate_to: localhost
   become: no
   changed_when: false
+  when: >
+    grafana_installed.stdout != "installed" and 
+    (not grafana_deb_file_ansible.stat.exists or not grafana_gpg_file_ansible.stat.exists) and
+    socks_tunnel_check.rc != 0
   tags: [tunnel]
 
 - name: Check if files exist on target host
@@ -119,13 +152,11 @@
           echo "=== DEB Package on Target ==="
           ls -la /tmp/grafana.deb && file /tmp/grafana.deb
       register: target_files_verify
+      changed_when: false
       tags: [download]
-
-    - name: Debug target files
-      ansible.builtin.debug:
-        var: target_files_verify.stdout
-      tags: [download]
-  when: grafana_installed.stdout != "installed" and (not grafana_deb_file_target.stat.exists or not grafana_gpg_file_target.stat.exists)
+  when: >
+    grafana_installed.stdout != "installed" and 
+    (not grafana_deb_file_target.stat.exists or not grafana_gpg_file_target.stat.exists)
   tags: [download]
 
 - name: Include OS-specific variables
