@@ -24,7 +24,7 @@
 - name: Start SSH tunnel from Ansible Host to telebot for internet access
   ansible.builtin.shell:
     cmd: |
-      ssh -f -N -L 1080:packages.grafana.com:443 telebot \
+      ssh -f -N -L 1080:packages.grafana.com:443 {{ groups['telebot_host'][0] }} \
       -o StrictHostKeyChecking=no \
       -o BatchMode=yes \
       -o ConnectTimeout=30
