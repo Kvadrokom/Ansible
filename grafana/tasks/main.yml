@@ -61,27 +61,21 @@
 
 - name: Download Grafana files to Ansible Host via SOCKS tunnel
   block:
-    - name: Download Grafana GPG key to Ansible Host via SOCKS
-      ansible.builtin.get_url:
-        url: "https://packages.grafana.com/gpg.key"
-        dest: "/tmp/grafana-gpg.key"
+    - name: Download Grafana GPG key to Ansible Host via SOCKS using curl
+      ansible.builtin.shell:
+        cmd: |
+          curl --socks5 localhost:1080 -o "/tmp/grafana-gpg.key" "https://packages.grafana.com/gpg.key"
       delegate_to: localhost
       become: no
-      environment:
-        https_proxy: "socks5://localhost:1080"
-        http_proxy: "socks5://localhost:1080"
       when: not grafana_gpg_file_ansible.stat.exists
       tags: [download]
 
-    - name: Download Grafana package to Ansible Host via SOCKS
-      ansible.builtin.get_url:
-        url: "https://dl.grafana.com/oss/release/grafana_{{ grafana_version }}_amd64.deb"
-        dest: "/tmp/grafana.deb"
+    - name: Download Grafana package to Ansible Host via SOCKS using curl
+      ansible.builtin.shell:
+        cmd: |
+          curl --socks5 localhost:1080 -o "/tmp/grafana.deb" "https://dl.grafana.com/oss/release/grafana_{{ grafana_version }}_amd64.deb"
       delegate_to: localhost
       become: no
-      environment:
-        https_proxy: "socks5://localhost:1080"
-        http_proxy: "socks5://localhost:1080"
       when: not grafana_deb_file_ansible.stat.exists
       tags: [download]
 
@@ -89,22 +83,18 @@
       ansible.builtin.shell:
         cmd: |
           echo "=== GPG Key ==="
-          head -2 /tmp/grafana-gpg.key
+          test -f /tmp/grafana-gpg.key && head -2 /tmp/grafana-gpg.key || echo "File not found"
           echo "=== DEB Package ==="
-          file /tmp/grafana.deb
+          test -f /tmp/grafana.deb && file /tmp/grafana.deb || echo "File not found"
       delegate_to: localhost
       become: no
       register: file_verify_ansible
       changed_when: false
       tags: [download]
-
-    - name: Debug Ansible Host files
-      ansible.builtin.debug:
-        var: file_verify_ansible.stdout
-      tags: [download]
   when: >
     grafana_installed.stdout != "installed" and 
     (not grafana_deb_file_ansible.stat.exists or not grafana_gpg_file_ansible.stat.exists)
+
 
 - name: Stop SSH tunnel (only if we started it)
   ansible.builtin.shell:
