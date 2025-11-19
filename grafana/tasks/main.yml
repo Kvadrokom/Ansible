@@ -206,13 +206,11 @@
     owner: "{{ grafana_service_user }}"
     group: "{{ grafana_service_group }}"
     mode: "{{ item.mode | default('0755') }}"
-    recurse: "{{ item.recurse | default(no) }}"
   loop:
     - path: "{{ grafana_data_dir }}"
     - path: "{{ grafana_log_dir }}"
     - path: "{{ grafana_install_dir }}/data"
     - path: "{{ grafana_install_dir }}/conf"
-      recurse: yes
   tags: [configuration, directories]
 
 - name: Deploy Grafana configuration
