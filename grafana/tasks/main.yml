@@ -53,6 +53,7 @@
     host: 127.0.0.1
     timeout: 10
   delegate_to: localhost
+  become: no
   when: >
     grafana_installed.stdout != "installed" and 
     (not grafana_deb_file_ansible.stat.exists or not grafana_gpg_file_ansible.stat.exists)
