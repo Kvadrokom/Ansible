@@ -6,44 +6,125 @@
   changed_when: false
   tags: [grafana]
 
-- name: Download Grafana files via telebot host
+- name: Check if files already exist on Ansible Host
   block:
-    - name: Check if files already exist on telebot host
+    - name: Check if GPG key exists on Ansible Host
+      ansible.builtin.stat:
+        path: "/tmp/grafana-gpg.key"
+      register: grafana_gpg_file_ansible
+
+    - name: Check if DEB package exists on Ansible Host
       ansible.builtin.stat:
         path: "/tmp/grafana.deb"
-      register: grafana_deb_file
-      delegate_to: telebot
-      become: no
-    
-    - name: Download Grafana package via telebot host
-      ansible.builtin.get_url:
-        url: "https://dl.grafana.com/oss/release/grafana_{{ grafana_version }}_amd64.deb"
-        dest: "/tmp/grafana.deb"
-      delegate_to: telebot
-      become: no
-      when: not grafana_deb_file.stat.exists
-      tags: [download]
+      register: grafana_deb_file_ansible
+  delegate_to: localhost
+  become: no
+  tags: [download]
 
-    - name: Download Grafana GPG key via telebot host
+- name: Start SSH tunnel from Ansible Host to telebot for internet access
+  ansible.builtin.shell:
+    cmd: |
+      ssh -f -N -L 1080:packages.grafana.com:443 telebot \
+      -o StrictHostKeyChecking=no \
+      -o BatchMode=yes \
+      -o ConnectTimeout=30
+  delegate_to: localhost
+  become: no
+  when: grafana_installed.stdout != "installed" and (not grafana_deb_file_ansible.stat.exists or not grafana_gpg_file_ansible.stat.exists)
+  changed_when: false
+  tags: [tunnel]
+
+- name: Download Grafana files to Ansible Host via tunnel
+  block:
+    - name: Download Grafana GPG key to Ansible Host via tunnel
       ansible.builtin.get_url:
         url: "https://packages.grafana.com/gpg.key"
         dest: "/tmp/grafana-gpg.key"
-      delegate_to: telebot
+        proxy: "http://localhost:1080"
+      delegate_to: localhost
       become: no
-      when: not grafana_deb_file.stat.exists
+      when: not grafana_gpg_file_ansible.stat.exists
       tags: [download]
 
-    - name: Copy files from telebot host to target host using synchronize
-      ansible.builtin.synchronize:
-        src: "{{ item.src }}"
-        dest: "{{ item.dest }}"
-        delegate_src: telebot
-      loop:
-        - { src: "/tmp/grafana-gpg.key", dest: "/tmp/grafana-gpg.key" }
-        - { src: "/tmp/grafana.deb", dest: "/tmp/grafana.deb" }
-      when: not grafana_deb_file.stat.exists
+    - name: Download Grafana package to Ansible Host via tunnel
+      ansible.builtin.get_url:
+        url: "https://dl.grafana.com/oss/release/grafana_{{ grafana_version }}_amd64.deb"
+        dest: "/tmp/grafana.deb"
+        proxy: "http://localhost:1080"
+      delegate_to: localhost
+      become: no
+      when: not grafana_deb_file_ansible.stat.exists
       tags: [download]
-  when: grafana_installed.stdout != "installed"
+
+    - name: Verify downloaded files on Ansible Host
+      ansible.builtin.shell:
+        cmd: |
+          echo "=== GPG Key ==="
+          head -2 /tmp/grafana-gpg.key
+          echo "=== DEB Package ==="
+          file /tmp/grafana.deb
+      delegate_to: localhost
+      become: no
+      register: file_verify_ansible
+      tags: [download]
+
+    - name: Debug Ansible Host files
+      ansible.builtin.debug:
+        var: file_verify_ansible.stdout
+      tags: [download]
+  when: grafana_installed.stdout != "installed" and (not grafana_deb_file_ansible.stat.exists or not grafana_gpg_file_ansible.stat.exists)
+
+- name: Stop SSH tunnel
+  ansible.builtin.shell:
+    cmd: "pkill -f 'ssh.*1080.*packages.grafana.com'"
+  delegate_to: localhost
+  become: no
+  changed_when: false
+  tags: [tunnel]
+
+- name: Check if files exist on target host
+  block:
+    - name: Check if GPG key exists on target host
+      ansible.builtin.stat:
+        path: "/tmp/grafana-gpg.key"
+      register: grafana_gpg_file_target
+
+    - name: Check if DEB package exists on target host
+      ansible.builtin.stat:
+        path: "/tmp/grafana.deb"
+      register: grafana_deb_file_target
+  tags: [download]
+
+- name: Copy files from Ansible Host to target host
+  block:
+    - name: Copy GPG key to target host
+      ansible.builtin.copy:
+        src: "/tmp/grafana-gpg.key"
+        dest: "/tmp/grafana-gpg.key"
+      when: not grafana_gpg_file_target.stat.exists
+
+    - name: Copy DEB package to target host
+      ansible.builtin.copy:
+        src: "/tmp/grafana.deb"
+        dest: "/tmp/grafana.deb"
+      when: not grafana_deb_file_target.stat.exists
+
+    - name: Verify files on target host
+      ansible.builtin.shell:
+        cmd: |
+          echo "=== GPG Key on Target ==="
+          ls -la /tmp/grafana-gpg.key && head -2 /tmp/grafana-gpg.key
+          echo "=== DEB Package on Target ==="
+          ls -la /tmp/grafana.deb && file /tmp/grafana.deb
+      register: target_files_verify
+      tags: [download]
+
+    - name: Debug target files
+      ansible.builtin.debug:
+        var: target_files_verify.stdout
+      tags: [download]
+  when: grafana_installed.stdout != "installed" and (not grafana_deb_file_target.stat.exists or not grafana_gpg_file_target.stat.exists)
+  tags: [download]
 
 - name: Include OS-specific variables
   include_vars: "{{ item }}"
@@ -151,12 +232,24 @@
   when: grafana_service_state == "started"
   tags: [verification, health-check]
 
-- name: Cleanup temporary files
+- name: Cleanup temporary files on target host
   ansible.builtin.file:
     path: "{{ item }}"
     state: absent
   loop:
     - "/tmp/grafana-gpg.key"
     - "/tmp/grafana.deb"
+  when: grafana_installed.stdout == "installed"
+  tags: [cleanup]
+
+- name: Cleanup temporary files on Ansible Host (optional)
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - "/tmp/grafana-gpg.key"
+    - "/tmp/grafana.deb"
+  delegate_to: localhost
+  become: no
   when: grafana_installed.stdout == "installed"
   tags: [cleanup]
