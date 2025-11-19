@@ -11,7 +11,8 @@ grafana_log_dir: "/var/log/grafana"
 grafana_install_dir: "/usr/share/grafana"
 grafana_admin_user: "admin"
 grafana_admin_password: "admin"
-grafana_http_port: "3000"
+grafana_http_port: 3000
+grafana_http_addr: "0.0.0.0"
 
 # Назначение: пользователь и группа, от имени которых работает служба Grafana
 # vars file for grafana
