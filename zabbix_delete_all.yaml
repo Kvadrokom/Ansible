@@ -1,0 +1,5 @@
+- name: Delete Zabbix 6 using role
+  hosts: monitor
+  become: true
+  roles:
+    - zabbix_del_all

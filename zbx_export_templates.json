@@ -1,0 +1,66 @@
+{
+    "zabbix_export": {
+        "version": "6.0",
+        "date": "2025-12-06T19:09:48Z",
+        "groups": [
+            {
+                "uuid": "7df96b18c230490a9a0a9e2307226338",
+                "name": "Templates"
+            }
+        ],
+        "templates": [
+            {
+                "uuid": "5b29e1faab2c4d3bb22005ca13281559",
+                "template": "WMI Template",
+                "name": "WMI Template",
+                "groups": [
+                    {
+                        "name": "Templates"
+                    }
+                ],
+                "discovery_rules": [
+                    {
+                        "uuid": "bb73696cac0340bfbff64dfae64f9a0e",
+                        "name": "cpu_discovery",
+                        "type": "ZABBIX_ACTIVE",
+                        "key": "cpu_discovery",
+                        "item_prototypes": [
+                            {
+                                "uuid": "19cf3a48b5af49be80116ee74ca2841e",
+                                "name": "{#DEVICE}: cpu utilization",
+                                "type": "ZABBIX_ACTIVE",
+                                "key": "cpu_load[{#DEVICE}]",
+                                "value_type": "FLOAT"
+                            }
+                        ]
+                    },
+                    {
+                        "uuid": "064b1c3778d44a509b6b25ef1fe3b11f",
+                        "name": "Hardware temperature",
+                        "type": "ZABBIX_ACTIVE",
+                        "key": "device_temperature",
+                        "item_prototypes": [
+                            {
+                                "uuid": "50092c7316e94b9a8b8671bfe1e355a6",
+                                "name": "{#DEVICE}: temperature",
+                                "type": "ZABBIX_ACTIVE",
+                                "key": "dev_temperature[{#DEVICE}]",
+                                "value_type": "FLOAT",
+                                "trigger_prototypes": [
+                                    {
+                                        "uuid": "a90db45b44e441cc9c1526ecd161eed6",
+                                        "expression": "last(/WMI Template/dev_temperature[{#DEVICE}])>5",
+                                        "recovery_mode": "RECOVERY_EXPRESSION",
+                                        "recovery_expression": "last(/WMI Template/dev_temperature[{#DEVICE}])<=5",
+                                        "name": "High {#DEVICE}: temperature",
+                                        "priority": "DISASTER"
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                ]
+            }
+        ]
+    }
+}
