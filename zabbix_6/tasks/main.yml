@@ -129,9 +129,7 @@
   become: yes
   become_user: postgres
   shell: |
-    zcat /usr/share/zabbix-sql-scripts/postgresql/server.sql.gz | psql -d "{{ zabbix_db_name }}" -U "{{ zabbix_db_user }}"
-  environment:
-    PGPASSWORD: "{{ zabbix_db_password }}"
+    zcat /usr/share/zabbix-sql-scripts/postgresql/server.sql.gz | psql -d "{{ zabbix_db_name }}" -v ON_ERROR_STOP=1
   when: zabbix_tables_count.stdout == "0"
 
 - name: Configure Zabbix server settings
