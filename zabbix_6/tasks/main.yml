@@ -251,6 +251,25 @@
     - dir
   notify: Restart Apache
 
+- name: Change owner of all tables to zabbix user
+  become: yes
+  become_user: postgres
+  shell: |
+    psql -d "{{ zabbix_db_name }}" -c "REASSIGN OWNED BY postgres TO {{ zabbix_db_user }};"
+
+- name: Grant all privileges to zabbix user
+  become: yes
+  become_user: postgres
+  shell: |
+    psql -d "{{ zabbix_db_name }}" << EOF
+    GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO {{ zabbix_db_user }};
+    GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO {{ zabbix_db_user }};
+    GRANT ALL PRIVILEGES ON ALL FUNCTIONS IN SCHEMA public TO {{ zabbix_db_user }};
+    ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO {{ zabbix_db_user }};
+    ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO {{ zabbix_db_user }};
+    ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON FUNCTIONS TO {{ zabbix_db_user }};
+    EOF
+
 - name: Ensure services are enabled and started
   systemd:
     name: "{{ item }}"
