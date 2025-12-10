@@ -251,12 +251,6 @@
     - dir
   notify: Restart Apache
 
-- name: Change owner of all tables to zabbix user
-  become: yes
-  become_user: postgres
-  shell: |
-    psql -d "{{ zabbix_db_name }}" -c "REASSIGN OWNED BY postgres TO {{ zabbix_db_user }};"
-
 - name: Grant all privileges to zabbix user
   become: yes
   become_user: postgres
