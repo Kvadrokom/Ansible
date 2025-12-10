@@ -151,7 +151,6 @@
     # Настройки для алертов
     - { option: StartAlerters, value: 3 }
     - { option: AlertScriptsPath, value: /usr/lib/zabbix/alertscripts }
-    - { option: EnableRemoteCommands, value: 1 }
   notify: Restart Zabbix server
 
 - name: Fix Zabbix server config permissions
