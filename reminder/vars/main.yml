@@ -4,4 +4,5 @@
   deploy_dir: "/home/greenbec/deploy"
   dest_dir: "/home/greenbec/reminder"
   git_branch: "develop"
+  tele_bot: "reminder"
 # vars file for reminder

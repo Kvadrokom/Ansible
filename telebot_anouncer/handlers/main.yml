@@ -1,2 +1,6 @@
 ---
-# handlers file for telebot_anouncer
+- name: Удаляем папку с файлами git
+  file:
+    path: "{{ deploy_dir }}"
+    state: absent
+# handlers file for telebot

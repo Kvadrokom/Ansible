@@ -21,14 +21,14 @@
     - { src: "{{ deploy_dir }}/bot_logger.py", dest: "{{dest_dir}}" }
   notify: Удаляем папку с файлами git
 
-- name: Stop reminder service
+- name: Stop telegrambot service
   systemd:
-    name: reminder
+    name: {{ tele_bot}}
     state: stopped
 
-- name: Start reminder service
+- name: Start telegrambot service
   systemd:
-    name: reminder
+    name: {{ tele_bot }}
     enabled: yes
     state: started
   register: service_status
@@ -54,5 +54,5 @@
     that:
     - service_status.status.ActiveState == 'active'
     - service_status.status.SubState == 'running'
-    msg: "Service reminder is not running. Status: {{ service_status.status }}"  
+    msg: "Service {{ tele_bot }} is not running. Status: {{ service_status.status }}"  
 # tasks file for reminder

@@ -1,2 +1,8 @@
 ---
-# vars file for telebot_anouncer
+  user: greenbec
+  github_repo: "https://github.com/Kvadrokom/telegrambot.git"
+  deploy_dir: "/home/greenbec/deploy"
+  dest_dir: "/home/greenbec/telebot"
+  git_branch: "develop"
+  tele_bot: "telebot"
+# vars file for telebot
