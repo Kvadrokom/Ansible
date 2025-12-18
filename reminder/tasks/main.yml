@@ -23,7 +23,7 @@
 
 - name: Stop telegrambot service
   systemd:
-    name: {{ tele_bot}}
+    name: {{ tele_bot }}
     state: stopped
 
 - name: Start telegrambot service
