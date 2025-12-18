@@ -23,12 +23,12 @@
 
 - name: Stop telegrambot service
   systemd:
-    name: {{ tele_bot }}
+    name: "{{ tele_bot }}"
     state: stopped
 
 - name: Start telegrambot service
   systemd:
-    name: {{ tele_bot }}
+    name: "{{ tele_bot }}"
     enabled: yes
     state: started
   register: service_status
