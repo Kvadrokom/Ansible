@@ -1,0 +1,33 @@
+---
+- name: Deploy telebot based on environment type
+  hosts: all
+  become: true
+  gather_facts: false
+  vars:
+    stand_type: "{{ STAND_TYPE | default('test') }}"  # переменная ansible или заданная по умолчанию
+
+  pre_tasks:
+    - name: Set target group dynamically
+      set_fact:
+        target_group: "{% if stand_type == 'prom' %}telebot_host{% else %}test_host{% endif %}"
+        deploy_dir: "{% if stand_type == 'prom' %}/root/deploy_bot2{% else %}/home/greenbec/deploy_bot2{% endif %}"
+        dest_dir: "{% if stand_type == 'prom' %}/root/bot2{% else %}/home/greenbec/bot2{% endif %}"
+        git_branch: "{% if stand_type == 'prom' %}remider{% else %}reminder_test{% endif %}"
+
+    - name: Verify that target group exists
+      fail:
+        msg: "Group '{{ target_group }}' not found in inventory. Available groups: {{ groups.keys() | list }}"
+      when: target_group not in groups
+
+    - name: Debug which host we're delegating to
+      debug:
+        msg: "Will delegate to first host from group '{{ target_group }}': {{ groups[target_group][0] }}"
+
+    - name: Debugging multiple variables
+      debug:
+        msg: "target_group={{ target_group }} | deploy_dir={{ deploy_dir }} | dest_dir={{ dest_dir }} | git_branch={{ git_branch }}"
+
+  roles:
+    - role: bot2
+      delegate_to: "{{ groups[target_group][0] }}"  # делегируем выполнение первому хосту выбранной группы
+      run_once: yes
