@@ -28,6 +28,6 @@
         msg: "target_group={{ target_group }} | deploy_dir={{ deploy_dir }} | dest_dir={{ dest_dir }} | git_branch={{ git_branch }}"
 
   roles:
-    - role: bot2
+    - role: telebot
       delegate_to: "{{ groups[target_group][0] }}"  # делегируем выполнение первому хосту выбранной группы
       run_once: yes
