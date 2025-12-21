@@ -2,7 +2,7 @@
 - name: Deploy telebot based on environment type
   hosts: all
   become: true
-  gather_facts: false
+  gather_facts: true
   vars:
     stand_type: "{{ STAND_TYPE | default('test') }}"  # переменная ansible или заданная по умолчанию
 
