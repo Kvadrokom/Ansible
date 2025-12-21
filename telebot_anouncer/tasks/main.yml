@@ -5,6 +5,16 @@
     state: present
   notify: Удаляем папку с файлами git  
 
+- name: DEBUG - Show user context before git
+  debug:
+    msg: |
+      Ansible user: {{ ansible_user_id }}
+      Remote user: {{ ansible_user }}
+      Become: {{ ansible_become }}
+      Become user: {{ ansible_become_user }}
+      Home: {{ ansible_env.HOME | default('Not set') }}
+      SSH Auth Socket: {{ ansible_env.SSH_AUTH_SOCK | default('Not set') }}
+
 - name: Clone or Update Repository
   git:
     repo: "{{ github_repo }}"
