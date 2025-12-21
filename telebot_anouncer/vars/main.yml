@@ -1,6 +1,6 @@
 ---
   user: greenbec
-  github_repo: "https://github.com/Kvadrokom/telegrambot.git"
+  github_repo: "git@github.com:Kvadrokom/telegrambot.git"
   deploy_dir: "/home/greenbec/deploy"
   dest_dir: "/home/greenbec/telebot"
   git_branch: "develop"

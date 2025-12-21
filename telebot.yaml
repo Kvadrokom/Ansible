@@ -11,8 +11,8 @@
       set_fact:
         target_group: "{% if stand_type == 'prom' %}telebot_host{% else %}test_host{% endif %}"
         deploy_dir: "{% if stand_type == 'prom' %}/root/deploy_bot2{% else %}/home/greenbec/deploy_bot2{% endif %}"
-        dest_dir: "{% if stand_type == 'prom' %}/root/bot2{% else %}/home/greenbec/bot2{% endif %}"
-        git_branch: "{% if stand_type == 'prom' %}reminder{% else %}reminder_test{% endif %}"
+        dest_dir: "{% if stand_type == 'prom' %}/root/telegrambot{% else %}/home/greenbec/telebot{% endif %}"
+        git_branch: "{% if stand_type == 'prom' %}main{% else %}develop{% endif %}"
 
     - name: Verify that target group exists
       fail:
