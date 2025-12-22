@@ -13,6 +13,7 @@
         deploy_dir: "{% if stand_type == 'prom' %}/root/deploy{% else %}/home/greenbec/deploy{% endif %}"
         dest_dir: "{% if stand_type == 'prom' %}/root/reminder{% else %}/home/greenbec/reminder{% endif %}"
         git_branch: "{% if stand_type == 'prom' %}master{% else %}develop{% endif %}"
+      tags: [clone, setup, copy]
 
     - name: Verify that target group exists
       fail:
