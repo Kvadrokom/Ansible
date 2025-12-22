@@ -3,9 +3,8 @@
   apt:
     name: git
     state: present
-  notify: Удаляем папку с файлами git  
+  notify: Удаляем папку с файлами git
 
----
 - name: 🔍 DEBUG - SSH/Git диагностика перед клонированием
   block:
     - name: 1. Определить текущего пользователя на целевом хосте
@@ -122,12 +121,13 @@
           {{ debug_ssh_keys.stdout }}
           =========================================
 
-- name: Clone or Update Repository
-  git:
-    repo: "{{ github_repo }}"
-    dest: "{{ deploy_dir }}"
-    version: "{{ git_branch }}"
-    force: no
+# УДАЛИТЬ эту дублированную задачу - она уже есть ниже!
+# - name: Clone or Update Repository
+#   git:
+#     repo: "{{ github_repo }}"
+#     dest: "{{ deploy_dir }}"
+#     version: "{{ git_branch }}"
+#     force: no
 
 - name: Clone or Update Repository
   git:
@@ -137,11 +137,13 @@
     force: no
 
 - name: Копируем файлы в целевую директорию
-  shell:
-    cp "{{ item.src }}" "{{ item.dest }}"
+  copy:  # Лучше использовать copy вместо shell
+    src: "{{ item.src }}"
+    dest: "{{ item.dest }}"
+    mode: '0755'
   with_items:
-    - { src: "{{ deploy_dir }}/telegram_bot.py", dest: "{{dest_dir}}" }
-    - { src: "{{ deploy_dir }}/logger.py", dest: "{{dest_dir}}" }
+    - { src: "{{ deploy_dir }}/telegram_bot.py", dest: "{{ dest_dir }}" }
+    - { src: "{{ deploy_dir }}/logger.py", dest: "{{ dest_dir }}" }
   notify: Удаляем папку с файлами git
 
 - name: Stop telegrambot service
@@ -161,21 +163,18 @@
     timeout: 10
   when: service_status.changed
 
-
 - name: Check service status after delay
   systemd:
-    name: reminder
+    name: "{{ tele_bot }}"  # Было "reminder", должно быть "{{ tele_bot }}"
   register: service_status
 
-
-  #- name: Show ALL service_status data
-  #  debug:
-  #    var: service_status
+# - name: Show ALL service_status data
+#   debug:
+#     var: service_status
 
 - name: Verify service is active and running
   assert:
     that:
-    - service_status.status.ActiveState == 'active'
-    - service_status.status.SubState == 'running'
-    msg: "Service {{ tele_bot }} is not running. Status: {{ service_status.status }}"  
-# tasks file for telebot
+      - service_status.status.ActiveState == 'active'
+      - service_status.status.SubState == 'running'
+    msg: "Service {{ tele_bot }} is not running. Status: {{ service_status.status }}"
