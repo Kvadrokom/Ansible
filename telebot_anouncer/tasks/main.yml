@@ -12,6 +12,7 @@
     dest: "{{ deploy_dir }}"
     version: "{{ git_branch }}"
     force: no
+  become: no
 
 - name: Копируем файлы в целевую директорию
   copy:  # Лучше использовать copy вместо shell
