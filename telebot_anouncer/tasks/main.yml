@@ -4,6 +4,7 @@
     name: git
     state: present
   notify: Удаляем папку с файлами git
+  tags: [setup, prerequisites]
 
 
 - name: Clone or Update Repository
@@ -13,21 +14,22 @@
     version: "{{ git_branch }}"
     force: no
   become: no
+  tags: [clone, setup]
 
 - name: Копируем файлы в целевую директорию
-  copy:  # Лучше использовать copy вместо shell
-    src: "{{ item.src }}"
-    dest: "{{ item.dest }}"
-    mode: '0755'
+  shell:
+    cp "{{ item.src }}" "{{ item.dest }}"
   with_items:
     - { src: "{{ deploy_dir }}/telegram_bot.py", dest: "{{ dest_dir }}" }
     - { src: "{{ deploy_dir }}/logger.py", dest: "{{ dest_dir }}" }
   notify: Удаляем папку с файлами git
+  tags: [copy, setup]
 
 - name: Stop telegrambot service
   systemd:
     name: "{{ tele_bot }}"
     state: stopped
+  tags: [service]
 
 - name: Start telegrambot service
   systemd:
@@ -35,16 +37,19 @@
     enabled: yes
     state: started
   register: service_status
+  tags: [service]
 
 - name: Wait for service to fully initialize
   wait_for:
     timeout: 10
   when: service_status.changed
+  tags: [wait]
 
 - name: Check service status after delay
   systemd:
-    name: "{{ tele_bot }}"  # Было "reminder", должно быть "{{ tele_bot }}"
+    name: "{{ tele_bot }}"
   register: service_status
+  tags: [verify]
 
 # - name: Show ALL service_status data
 #   debug:
@@ -56,3 +61,4 @@
       - service_status.status.ActiveState == 'active'
       - service_status.status.SubState == 'running'
     msg: "Service {{ tele_bot }} is not running. Status: {{ service_status.status }}"
+  tags: [verify]
