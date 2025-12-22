@@ -3,7 +3,8 @@
   apt:
     name: git
     state: present
-  notify: Удаляем папку с файлами git  
+  tags: [setup, prerequisites]
+  notify: Удаляем папку с файлами git
 
 - name: Clone or Update Repository
   git:
@@ -11,6 +12,7 @@
     dest: "{{ deploy_dir }}"
     version: "{{ git_branch }}"
     force: no
+  tags: [clone, setup]
 
 - name: Копируем файлы в целевую директорию
   shell:
@@ -19,12 +21,14 @@
     - { src: "{{ deploy_dir }}/reminder.py", dest: "{{dest_dir}}" }
     - { src: "{{ deploy_dir }}/reminder_utils.py", dest: "{{dest_dir}}" }
     - { src: "{{ deploy_dir }}/bot_logger.py", dest: "{{dest_dir}}" }
+  tags: [copy, setup]
   notify: Удаляем папку с файлами git
 
 - name: Stop telegrambot service
   systemd:
     name: "{{ tele_bot }}"
     state: stopped
+  tags: [service]
 
 - name: Start telegrambot service
   systemd:
@@ -32,27 +36,25 @@
     enabled: yes
     state: started
   register: service_status
+  tags: [service]
 
 - name: Wait for service to fully initialize
   wait_for:
     timeout: 10
   when: service_status.changed
-
+  tags: [wait]
 
 - name: Check service status after delay
   systemd:
     name: reminder
   register: service_status
-
-
-  #- name: Show ALL service_status data
-  #  debug:
-  #    var: service_status
+  tags: [check]
 
 - name: Verify service is active and running
   assert:
     that:
     - service_status.status.ActiveState == 'active'
     - service_status.status.SubState == 'running'
-    msg: "Service {{ tele_bot }} is not running. Status: {{ service_status.status }}"  
+    msg: "Service {{ tele_bot }} is not running. Status: {{ service_status.status }}"
+  tags: [verify]
 # tasks file for reminder
