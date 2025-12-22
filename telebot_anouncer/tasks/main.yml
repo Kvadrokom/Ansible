@@ -21,7 +21,7 @@
     cp "{{ item.src }}" "{{ item.dest }}"
   with_items:
     - { src: "{{ deploy_dir }}/telegram_bot.py", dest: "{{ dest_dir }}" }
-    - { src: "{{ deploy_dir }}/logger.py", dest: "{{ dest_dir }}" }
+    - { src: "{{ deploy_dir }}/bot_logger.py", dest: "{{ dest_dir }}" }
   notify: Удаляем папку с файлами git
   tags: [copy, setup]
 
