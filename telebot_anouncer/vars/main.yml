@@ -4,5 +4,5 @@
   deploy_dir: "/home/greenbec/deploy"
   dest_dir: "/home/greenbec/telebot"
   git_branch: "develop"
-  tele_bot: "telegrambot"
+  tele_bot: "telebot"
 # vars file for telebot
