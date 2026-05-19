@@ -1,0 +1,6 @@
+---
+- name: Ste
+  hosts: users_onboarding_stepik
+  become: true
+  roles:
+    - users_onboarding

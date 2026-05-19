@@ -1,2 +1,13 @@
 ---
+- name: restart_nginx
+  systemd:
+    name: nginx
+    state: restarted
+  ignore_errors: yes
+
+- name: restart_ssh
+  systemd:
+    name: ssh
+    state: restarted
+  ignore_errors: yes
 # handlers file for users_onboarding

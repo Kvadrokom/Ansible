@@ -1,2 +1,196 @@
 ---
+  - name: Создать группы
+    group:
+      name: "{{ item }}"
+      state: present
+    loop:
+      - devteam
+      - qateam
+      - ops
+
+  - name: Создать пользователей с копированием /etc/skel
+    user:
+      name: "{{ item.name }}"
+      group: "{{ item.group }}"
+      groups: "{{ item.groups | default(omit) }}"
+      shell: /bin/bash
+      create_home: yes
+      skeleton: /etc/skel
+      state: present
+    loop:
+      - { name: "alice", group: "devteam" }
+      - { name: "alex",  group: "devteam" }
+      - { name: "bob",   group: "qateam" }
+      - { name: "charlie", group: "ops" }
+
+  - name: Установить политику смены паролей (chage)
+    command: >
+      chage -M {{ password_max_days }} -m {{ password_min_days }}
+      -W {{ password_warn_days }} {{ item.name }}
+    loop:
+      - { name: "alice" }
+      - { name: "alex" }
+      - { name: "bob" }
+      - { name: "charlie" }
+    changed_when: false
+  # 2. Групповые и индивидуальные права
+  - name: Создать директорию для кода
+    file:
+      path: /srv/project
+      state: directory
+      owner: root
+      group: devteam
+      mode: "2770"   # SGID бит + rwxrwx---
+    notify: restart_nginx
+
+  - name: Создать директорию для логов
+    file:
+      path: /srv/logs
+      state: directory
+      owner: root
+      group: root
+      mode: "0755"
+
+  - name: Установить POSIX ACL для qateam и ops в /srv/logs
+    file:
+      path: /srv/logs
+      state: directory
+      owner: root
+      group: root
+      mode: "0750"
+    # Ops получит позже полный доступ через ACL
+    ignore_errors: yes
+
+  - name: Добавить ACL для qateam (чтение) и ops (полный доступ) в /srv/logs
+    acl:
+      path: /srv/logs
+      entity: "{{ item.entity }}"
+      etype: "{{ item.etype }}"
+      permissions: "{{ item.perms }}"
+      state: present
+    loop:
+      - { entity: "qateam", etype: "group", perms: "r-x" }
+      - { entity: "ops",    etype: "group", perms: "rwx" }
+
+  - name: Создать общий каталог со sticky bit
+    file:
+      path: /tmp/sharedtest
+      state: directory
+      mode: "1777"   # sticky + rwxrwxrwt
+      owner: root
+      group: root
+
+  # 3. Расширенные ACL (alex → rw на /srv/logs/app1)
+  - name: Создать поддиректорию app1 в логах
+    file:
+      path: /srv/logs/app1
+      state: directory
+      mode: "0750"
+      owner: root
+      group: qateam
+
+  - name: Дать alex право rw на /srv/logs/app1 через ACL
+    acl:
+      path: /srv/logs/app1
+      entity: alex
+      etype: user
+      permissions: "rwx"
+      state: present
+      default: no
+
+  - name: Дать группе devteam только чтение на /srv/logs/app1
+    acl:
+      path: /srv/logs/app1
+      entity: devteam
+      etype: group
+      permissions: "r-x"
+      state: present
+  - name: Убедиться, что маска не обрезает права (маска = rwx)
+    command: setfacl -m mask:rwx /srv/logs/app1
+    changed_when: false
+
+  # 4. Сервисные аккаунты
+  - name: Создать системного пользователя nginx (UID < 1000)
+    user:
+      name: nginx
+      uid: 990
+      shell: /usr/sbin/nologin
+      system: yes
+      create_home: no
+      state: present
+
+  - name: Создать /srv/www для сайта
+    file:
+      path: /srv/www
+      state: directory
+      owner: nginx
+      group: nginx
+      mode: "0755"
+
+  - name: Права для чтения nginx на /srv/www (остальным — ничего)
+    file:
+      path: /srv/www
+      state: directory
+      owner: nginx
+      group: nginx
+      mode: "0750"
+    # Это даёт nginx r-x, остальным — ничего
+    
+  # 5. Запрет root SSH (если SSH сервер существует)
+  - name: Запретить root SSH-логин
+    lineinfile:
+      path: /etc/ssh/sshd_config
+      regexp: '^PermitRootLogin'
+      line: 'PermitRootLogin no'
+    notify: restart_ssh
+  # 6. Настройка sudoers (через отдельные файлы)
+  - name: Создать sudoers.d для charlie (ops) — перезапуск nginx
+    copy:
+      dest: /etc/sudoers.d/charlie_ops
+      content: |
+        charlie ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart nginx
+      mode: '0440'
+      validate: 'visudo -cf %s'
+
+  - name: sudoers для bob (qateam) — чтение логов
+    copy:
+      dest: /etc/sudoers.d/bob_qateam
+      content: |
+        bob ALL=(ALL) NOPASSWD: /usr/bin/cat /var/log/auth.log
+      mode: '0440'
+      validate: 'visudo -cf %s'
+
+  - name: sudoers для alice (devteam) — все команды с паролем
+    copy:
+      dest: /etc/sudoers.d/alice_devteam
+      content: |
+        alice ALL=(ALL) ALL
+      mode: '0440'
+      validate: 'visudo -cf %s'
+
+  - name: sudoers для alex — редактирование конкретного конфига
+    copy:
+      dest: /etc/sudoers.d/alex_special
+      content: |
+        alex ALL=(ALL) /usr/bin/nano /etc/nginx/nginx.conf
+      mode: '0440'
+      validate: 'visudo -cf %s'
+  # 7. Установка umask (постоянно)
+  - name: Прописать umask {{ default_umask }} в /etc/profile
+    lineinfile:
+      path: /etc/profile
+      regexp: '^umask'
+      line: 'umask {{ default_umask }}'
+      insertafter: EOF
+      state: present
+  - name: Проверить права на создаваемый файл (тест)
+    shell: |
+      touch /tmp/test_umask.txt && ls -l /tmp/test_umask.txt
+    register: umask_test
+    changed_when: false
+  - name: Вывод результата umask теста
+    debug:
+      msg: "Права на тестовый файл: {{ umask_test.stdout }}"
+
+    
 # tasks file for users_onboarding
