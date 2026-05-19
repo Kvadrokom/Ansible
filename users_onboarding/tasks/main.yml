@@ -183,6 +183,7 @@
       line: 'umask {{ default_umask }}'
       insertafter: EOF
       state: present
+      
   - name: Проверить права на создаваемый файл (тест)
     shell: |
       touch /tmp/test_umask.txt && ls -l /tmp/test_umask.txt

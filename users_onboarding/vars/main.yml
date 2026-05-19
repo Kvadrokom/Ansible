@@ -2,4 +2,5 @@
 password_max_days: 150
 password_min_days: 30
 password_warn_days: 7
+default_umask: 027
 # vars file for users_onboarding
